@@ -1,148 +1,72 @@
-<mxfile host="app.diagrams.net" agent="claude-code" version="24.7.17" pages="1">
-  <diagram id="q2algo" name="问题二求解算法流程">
-    <mxGraphModel dx="780" dy="1080" grid="0" gridSize="10" guides="1" tooltips="1"
-                  connect="1" arrows="1" fold="1" page="1" pageScale="1"
-                  pageWidth="780" pageHeight="1080" math="0" shadow="0">
+<mxfile host="app.diagrams.net" agent="mathmodel" version="24.7.17" pages="1">
+  <diagram id="q2algorithm" name="问题二求解框架">
+    <mxGraphModel dx="816" dy="384" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="816" pageHeight="384" math="0" shadow="0">
       <root>
-        <mxCell id="0" /><mxCell id="1" parent="0" />
-
-        <!-- ============ 顶部图例 ============ -->
-        <mxCell id="lg_sw1" value="" style="rounded=0;html=1;fillColor=#eef6fd;strokeColor=#3b547f;strokeWidth=1;" vertex="1" parent="1">
-          <mxGeometry x="140" y="14" width="16" height="22" as="geometry" />
-        </mxCell>
-        <mxCell id="lg_tx1" value="阶段一　架次构造" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=13;fontStyle=1;fontColor=#262626;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;" vertex="1" parent="1">
-          <mxGeometry x="162" y="8" width="150" height="34" as="geometry" />
-        </mxCell>
-        <mxCell id="lg_sw2" value="" style="rounded=0;html=1;fillColor=#fcead9;strokeColor=#c08b5c;strokeWidth=1;" vertex="1" parent="1">
-          <mxGeometry x="316" y="14" width="16" height="22" as="geometry" />
-        </mxCell>
-        <mxCell id="lg_tx2" value="阶段二　机型分配与调度" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=13;fontStyle=1;fontColor=#262626;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;" vertex="1" parent="1">
-          <mxGeometry x="338" y="8" width="190" height="34" as="geometry" />
-        </mxCell>
-        <mxCell id="lg_sw3" value="" style="rounded=0;html=1;fillColor=#e5dfeb;strokeColor=#9b979f;strokeWidth=1;" vertex="1" parent="1">
-          <mxGeometry x="532" y="14" width="16" height="22" as="geometry" />
-        </mxCell>
-        <mxCell id="lg_tx3" value="阶段三　评估与权衡" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=13;fontStyle=1;fontColor=#262626;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;" vertex="1" parent="1">
-          <mxGeometry x="554" y="8" width="170" height="34" as="geometry" />
-        </mxCell>
-
-        <!-- ============ 阶段一：架次构造 ============ -->
-        <mxCell id="n_start" value="开始：读取 DEM、机型参数、货箱清单与时限" style="rounded=1;arcSize=50;whiteSpace=wrap;html=1;fillColor=#f2f4f6;strokeColor=#8a97a3;strokeWidth=1.2;fontSize=15;fontStyle=1;fontColor=#262626;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;align=center;verticalAlign=middle;" vertex="1" parent="1">
-          <mxGeometry x="190" y="74" width="400" height="44" as="geometry" />
-        </mxCell>
-
-        <mxCell id="n_geo" value="预计算所有有序节点对的航段几何（水平距离、爬升高度、巡航海拔）" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#eef6fd;strokeColor=#3b547f;strokeWidth=1;fontSize=15;fontStyle=1;fontColor=#262626;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;align=center;verticalAlign=middle;" vertex="1" parent="1">
-          <mxGeometry x="140" y="148" width="500" height="50" as="geometry" />
-        </mxCell>
-
-        <mxCell id="n_split" value="紧急货箱（医疗物资 ∪ 首批保障）：每服务区单独组轻载架次&lt;br&gt;非紧急货箱：按 min(Qg, qmax) 与可用体积做 FFD 装箱&lt;br&gt;每批货物生成一个单服务区架次" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#eef6fd;strokeColor=#3b547f;strokeWidth=1;fontSize=15;fontStyle=1;fontColor=#262626;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;align=center;verticalAlign=middle;" vertex="1" parent="1">
-          <mxGeometry x="140" y="228" width="500" height="80" as="geometry" />
-        </mxCell>
-
-        <mxCell id="n_dia1" value="存在可行的合并对？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fdf7ec;strokeColor=#8a6d3b;strokeWidth=1.2;fontSize=15;fontStyle=1;fontColor=#262626;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;align=center;verticalAlign=middle;" vertex="1" parent="1">
-          <mxGeometry x="190" y="338" width="400" height="72" as="geometry" />
-        </mxCell>
-
-        <mxCell id="n_merge" value="合并两架次：服务区取并、最近邻重排路径&lt;br&gt;重算能耗与返航余量可行性后回到判断" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#eef6fd;strokeColor=#3b547f;strokeWidth=1;fontSize=15;fontStyle=1;fontColor=#262626;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;align=center;verticalAlign=middle;" vertex="1" parent="1">
-          <mxGeometry x="140" y="440" width="500" height="64" as="geometry" />
-        </mxCell>
-
-        <mxCell id="lbl_yes1" value="是" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=13;fontStyle=1;fontColor=#1f3f6b;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;" vertex="1" parent="1">
-          <mxGeometry x="400" y="412" width="30" height="24" as="geometry" />
-        </mxCell>
-        <mxCell id="lbl_no1" value="否" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=13;fontStyle=1;fontColor=#1f3f6b;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;" vertex="1" parent="1">
-          <mxGeometry x="598" y="348" width="30" height="24" as="geometry" />
-        </mxCell>
-
-        <!-- ============ 阶段二：机型分配与调度 ============ -->
-        <mxCell id="n_sort" value="架次按紧迫度排序：key =（最小硬时限, 最小期望送达时刻）" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#fcead9;strokeColor=#c08b5c;strokeWidth=1;fontSize=15;fontStyle=1;fontColor=#262626;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;align=center;verticalAlign=middle;" vertex="1" parent="1">
-          <mxGeometry x="140" y="544" width="500" height="50" as="geometry" />
-        </mxCell>
-
-        <mxCell id="n_dia2" value="所有架次已调度？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fdf7ec;strokeColor=#8a6d3b;strokeWidth=1.2;fontSize=15;fontStyle=1;fontColor=#262626;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;align=center;verticalAlign=middle;" vertex="1" parent="1">
-          <mxGeometry x="190" y="624" width="400" height="72" as="geometry" />
-        </mxCell>
-
-        <mxCell id="n_alloc" value="枚举 A/B/C 机型，保留质量、体积与能量可行者&lt;br&gt;每个候选取该机型最早空闲无人机与最早就绪电池&lt;br&gt;start = max(无人机空闲时刻, 电池就绪时刻)&lt;br&gt;选 start 最早者（并列取能耗低），占用无人机与电池" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#fcead9;strokeColor=#c08b5c;strokeWidth=1;fontSize=15;fontStyle=1;fontColor=#262626;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;align=center;verticalAlign=middle;" vertex="1" parent="1">
-          <mxGeometry x="140" y="726" width="500" height="92" as="geometry" />
-        </mxCell>
-
-        <mxCell id="n_charge" value="电池按两阶段等效模型充电：SOC = 1 - E/Euse&lt;br&gt;更新电池就绪时刻，供后续架次复用" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#fcead9;strokeColor=#c08b5c;strokeWidth=1;fontSize=15;fontStyle=1;fontColor=#262626;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;align=center;verticalAlign=middle;" vertex="1" parent="1">
-          <mxGeometry x="140" y="842" width="500" height="64" as="geometry" />
-        </mxCell>
-
-        <mxCell id="lbl_no2" value="否" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=13;fontStyle=1;fontColor=#1f3f6b;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;" vertex="1" parent="1">
-          <mxGeometry x="400" y="698" width="30" height="24" as="geometry" />
-        </mxCell>
-        <mxCell id="lbl_yes2" value="是" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=13;fontStyle=1;fontColor=#1f3f6b;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;" vertex="1" parent="1">
-          <mxGeometry x="598" y="634" width="30" height="24" as="geometry" />
-        </mxCell>
-
-        <!-- ============ 阶段三：评估与权衡 ============ -->
-        <mxCell id="n_eval" value="评估指标：架次数、总能耗、全部任务完成时间、&lt;br&gt;硬约束违反数、加权时延；并对比 C 型与 B 型装箱策略" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#e5dfeb;strokeColor=#9b979f;strokeWidth=1;fontSize=15;fontStyle=1;fontColor=#262626;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;align=center;verticalAlign=middle;" vertex="1" parent="1">
-          <mxGeometry x="140" y="930" width="500" height="64" as="geometry" />
-        </mxCell>
-
-        <mxCell id="n_out" value="输出运输架次表与逐箱交付时刻，结束" style="rounded=1;arcSize=50;whiteSpace=wrap;html=1;fillColor=#f2f4f6;strokeColor=#8a97a3;strokeWidth=1.2;fontSize=15;fontStyle=1;fontColor=#262626;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;align=center;verticalAlign=middle;" vertex="1" parent="1">
-          <mxGeometry x="190" y="1018" width="400" height="44" as="geometry" />
-        </mxCell>
-
-        <!-- ============ 主流程箭头 ============ -->
-        <mxCell id="e_start_geo" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;endArrow=block;endFill=1;endSize=5;strokeColor=#1f3f6b;strokeWidth=1.5;" edge="1" parent="1">
-          <mxGeometry relative="1" as="geometry"><mxPoint x="390" y="119" as="sourcePoint" /><mxPoint x="390" y="147" as="targetPoint" /></mxGeometry>
-        </mxCell>
-        <mxCell id="e_geo_split" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;endArrow=block;endFill=1;endSize=5;strokeColor=#1f3f6b;strokeWidth=1.5;" edge="1" parent="1">
-          <mxGeometry relative="1" as="geometry"><mxPoint x="390" y="199" as="sourcePoint" /><mxPoint x="390" y="227" as="targetPoint" /></mxGeometry>
-        </mxCell>
-        <mxCell id="e_split_dia1" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;endArrow=block;endFill=1;endSize=5;strokeColor=#1f3f6b;strokeWidth=1.5;" edge="1" parent="1">
-          <mxGeometry relative="1" as="geometry"><mxPoint x="390" y="309" as="sourcePoint" /><mxPoint x="390" y="337" as="targetPoint" /></mxGeometry>
-        </mxCell>
-        <mxCell id="e_dia1_merge" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;endArrow=block;endFill=1;endSize=5;strokeColor=#1f3f6b;strokeWidth=1.5;" edge="1" parent="1">
-          <mxGeometry relative="1" as="geometry"><mxPoint x="390" y="411" as="sourcePoint" /><mxPoint x="390" y="439" as="targetPoint" /></mxGeometry>
-        </mxCell>
-        <mxCell id="e_loop1" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;endArrow=block;endFill=1;endSize=5;strokeColor=#1f3f6b;strokeWidth=1.5;" edge="1" parent="1">
-          <mxGeometry relative="1" as="geometry">
-            <mxPoint x="139" y="472" as="sourcePoint" /><mxPoint x="189" y="374" as="targetPoint" />
-            <Array as="points"><mxPoint x="70" y="472" /><mxPoint x="70" y="374" /></Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="e_dia1_out" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;endArrow=none;endFill=0;strokeColor=#1f3f6b;strokeWidth=1.5;" edge="1" parent="1">
-          <mxGeometry relative="1" as="geometry">
-            <mxPoint x="591" y="374" as="sourcePoint" /><mxPoint x="389" y="524" as="targetPoint" />
-            <Array as="points"><mxPoint x="712" y="374" /><mxPoint x="712" y="524" /></Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="e_merge_sort" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;endArrow=block;endFill=1;endSize=5;strokeColor=#1f3f6b;strokeWidth=1.5;" edge="1" parent="1">
-          <mxGeometry relative="1" as="geometry"><mxPoint x="390" y="505" as="sourcePoint" /><mxPoint x="390" y="543" as="targetPoint" /></mxGeometry>
-        </mxCell>
-        <mxCell id="e_sort_dia2" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;endArrow=block;endFill=1;endSize=5;strokeColor=#1f3f6b;strokeWidth=1.5;" edge="1" parent="1">
-          <mxGeometry relative="1" as="geometry"><mxPoint x="390" y="595" as="sourcePoint" /><mxPoint x="390" y="623" as="targetPoint" /></mxGeometry>
-        </mxCell>
-        <mxCell id="e_dia2_alloc" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;endArrow=block;endFill=1;endSize=5;strokeColor=#1f3f6b;strokeWidth=1.5;" edge="1" parent="1">
-          <mxGeometry relative="1" as="geometry"><mxPoint x="390" y="697" as="sourcePoint" /><mxPoint x="390" y="725" as="targetPoint" /></mxGeometry>
-        </mxCell>
-        <mxCell id="e_alloc_charge" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;endArrow=block;endFill=1;endSize=5;strokeColor=#1f3f6b;strokeWidth=1.5;" edge="1" parent="1">
-          <mxGeometry relative="1" as="geometry"><mxPoint x="390" y="819" as="sourcePoint" /><mxPoint x="390" y="841" as="targetPoint" /></mxGeometry>
-        </mxCell>
-        <mxCell id="e_loop2" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;endArrow=block;endFill=1;endSize=5;strokeColor=#1f3f6b;strokeWidth=1.5;" edge="1" parent="1">
-          <mxGeometry relative="1" as="geometry">
-            <mxPoint x="139" y="874" as="sourcePoint" /><mxPoint x="189" y="660" as="targetPoint" />
-            <Array as="points"><mxPoint x="70" y="874" /><mxPoint x="70" y="660" /></Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="e_dia2_out" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;endArrow=none;endFill=0;strokeColor=#1f3f6b;strokeWidth=1.5;" edge="1" parent="1">
-          <mxGeometry relative="1" as="geometry">
-            <mxPoint x="591" y="660" as="sourcePoint" /><mxPoint x="389" y="918" as="targetPoint" />
-            <Array as="points"><mxPoint x="712" y="660" /><mxPoint x="712" y="918" /></Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="e_charge_eval" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;endArrow=block;endFill=1;endSize=5;strokeColor=#1f3f6b;strokeWidth=1.5;" edge="1" parent="1">
-          <mxGeometry relative="1" as="geometry"><mxPoint x="390" y="907" as="sourcePoint" /><mxPoint x="390" y="929" as="targetPoint" /></mxGeometry>
-        </mxCell>
-        <mxCell id="e_eval_out" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;endArrow=block;endFill=1;endSize=5;strokeColor=#1f3f6b;strokeWidth=1.5;" edge="1" parent="1">
-          <mxGeometry relative="1" as="geometry"><mxPoint x="390" y="995" as="sourcePoint" /><mxPoint x="390" y="1017" as="targetPoint" /></mxGeometry>
-        </mxCell>
-
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="vlab_0" value="构&lt;br&gt;造&lt;br&gt;基&lt;br&gt;线" style="text;html=1;strokeColor=none;fillColor=none;whiteSpace=wrap;fontSize=17;fontColor=#000000;align=center;verticalAlign=top;" vertex="1" parent="1">
+  <mxGeometry x="20.0" y="18.0" width="20.0" height="298.0" as="geometry" />
+</mxCell>
+        <mxCell id="box_0_0" value="紧急货箱&lt;br&gt;单独组批" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+  <mxGeometry x="44.0" y="14.0" width="198.0" height="50.0" as="geometry" />
+</mxCell>
+        <mxCell id="box_0_1" value="非紧急货箱&lt;br&gt;FFD 装箱" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+  <mxGeometry x="44.0" y="72.0" width="198.0" height="50.0" as="geometry" />
+</mxCell>
+        <mxCell id="box_0_2" value="地理相近架次&lt;br&gt;贪心合并" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+  <mxGeometry x="44.0" y="130.0" width="198.0" height="50.0" as="geometry" />
+</mxCell>
+        <mxCell id="box_0_3" value="紧迫度排序&lt;br&gt;枚举 A/B/C 机型" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+  <mxGeometry x="44.0" y="188.0" width="198.0" height="50.0" as="geometry" />
+</mxCell>
+        <mxCell id="box_0_4" value="最早空闲无人机&lt;br&gt;与就绪电池" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+  <mxGeometry x="44.0" y="246.0" width="198.0" height="50.0" as="geometry" />
+</mxCell>
+        <mxCell id="vlab_1" value="邻&lt;br&gt;域&lt;br&gt;搜&lt;br&gt;索" style="text;html=1;strokeColor=none;fillColor=none;whiteSpace=wrap;fontSize=17;fontColor=#000000;align=center;verticalAlign=top;" vertex="1" parent="1">
+  <mxGeometry x="296.0" y="18.0" width="20.0" height="298.0" as="geometry" />
+</mxCell>
+        <mxCell id="box_1_0" value="ALNS 解空间&lt;br&gt;(划分, 派工顺序 π)" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+  <mxGeometry x="320.0" y="14.0" width="198.0" height="50.0" as="geometry" />
+</mxCell>
+        <mxCell id="box_1_1" value="7 个破坏算子&lt;br&gt;随机·Shaw·整区" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+  <mxGeometry x="320.0" y="72.0" width="198.0" height="50.0" as="geometry" />
+</mxCell>
+        <mxCell id="box_1_2" value="4 个修复算子&lt;br&gt;含成组修复" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+  <mxGeometry x="320.0" y="130.0" width="198.0" height="50.0" as="geometry" />
+</mxCell>
+        <mxCell id="box_1_3" value="轮盘赌自适应&lt;br&gt;算子权重" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+  <mxGeometry x="320.0" y="188.0" width="198.0" height="50.0" as="geometry" />
+</mxCell>
+        <mxCell id="box_1_4" value="模拟退火&lt;br&gt;接受准则" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+  <mxGeometry x="320.0" y="246.0" width="198.0" height="50.0" as="geometry" />
+</mxCell>
+        <mxCell id="vlab_2" value="约&lt;br&gt;束&lt;br&gt;扫&lt;br&gt;描" style="text;html=1;strokeColor=none;fillColor=none;whiteSpace=wrap;fontSize=17;fontColor=#000000;align=center;verticalAlign=top;" vertex="1" parent="1">
+  <mxGeometry x="572.0" y="18.0" width="20.0" height="298.0" as="geometry" />
+</mxCell>
+        <mxCell id="box_2_0" value="ε-约束扫描&lt;br&gt;固定 K∈&lt;br&gt;{20,22,25,30,35,40}" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+  <mxGeometry x="596.0" y="14.0" width="198.0" height="66.0" as="geometry" />
+</mxCell>
+        <mxCell id="box_2_1" value="逐档最优化&lt;br&gt;时效目标" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+  <mxGeometry x="596.0" y="88.0" width="198.0" height="50.0" as="geometry" />
+</mxCell>
+        <mxCell id="box_2_2" value="四维非支配前沿&lt;br&gt;架次·能耗·时间·时延" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+  <mxGeometry x="596.0" y="146.0" width="198.0" height="50.0" as="geometry" />
+</mxCell>
+        <mxCell id="box_2_3" value="时效优先取&lt;br&gt;K ≤ 20 档" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+  <mxGeometry x="596.0" y="204.0" width="198.0" height="50.0" as="geometry" />
+</mxCell>
+        <mxCell id="box_2_4" value="架次数是手段&lt;br&gt;而非目的" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+  <mxGeometry x="596.0" y="262.0" width="198.0" height="50.0" as="geometry" />
+</mxCell>
+        <mxCell id="arr_0" value="" style="shape=singleArrow;direction=east;html=1;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;arrowWidth=0.42;arrowSize=0.30;" vertex="1" parent="1">
+  <mxGeometry x="256.0" y="150.0" width="26.0" height="26.0" as="geometry" />
+</mxCell>
+        <mxCell id="arr_1" value="" style="shape=singleArrow;direction=east;html=1;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;arrowWidth=0.42;arrowSize=0.30;" vertex="1" parent="1">
+  <mxGeometry x="532.0" y="150.0" width="26.0" height="26.0" as="geometry" />
+</mxCell>
+        <mxCell id="bar" value="输出推荐方案：20 架次 · 68.713 kWh · 8732.6 s · 硬违约 0" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+  <mxGeometry x="20.0" y="336.0" width="774.0" height="34.0" as="geometry" />
+</mxCell>
       </root>
     </mxGraphModel>
   </diagram>

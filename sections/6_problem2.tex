@@ -17,13 +17,14 @@
 
 鉴于问题规模与约束耦合，本文采用“构造基线 + 大邻域自适应搜索（ALNS）+ $\varepsilon$-约束扫描”的求解框架，并另做两层小规模精确验证。
 
-\textbf{（1）构造基线与离散事件调度。}基线沿用“紧急货箱单独组批、非紧急货箱按 FFD 装箱、地理相近架次贪心合并”的规则生成初始架次集合，再按紧迫度排序、对每个架次枚举 A/B/C 机型并取最早可用无人机与电池完成调度。该基线的流程如图~\ref{fig:q2-algorithm}所示（其第三阶段原有的两种装箱策略对比已由下文的 $\varepsilon$-约束扫描取代，不再作为结论）。
+\textbf{（1）构造基线与离散事件调度。}基线沿用“紧急货箱单独组批、非紧急货箱按 FFD 装箱、地理相近架次贪心合并”的规则生成初始架次集合，再按紧迫度排序、对每个架次枚举 A/B/C 机型并取最早可用无人机与电池完成调度。问题二的求解框架如图~\ref{fig:q2-algorithm}所示：上述基线解再经 ALNS 破坏—修复搜索改进，最后以 $\varepsilon$-约束逐档扫描架次数上限，取时效优先的一档作为推荐方案。
 
-% 画布 724×1062 px，纵向长图，按 0.9\textwidth 插入可保证图内文字约 8.5 pt
+% 画布 816×384 px，横版三栏（宽高比 2.13），与图 2.1《总技术路线图》同宽同字号；
+% 按 \textwidth 插入后图内文字约 9.5 pt。源文件由 code/make_q2_algorithm.py 生成。
 \begin{figure}[htbp]
 	\centering
-	\includegraphics[width=0.9\textwidth]{figures/fig_q2_algorithm.pdf}
-	\caption{问题二基线构造启发式流程}
+	\includegraphics[width=\textwidth]{figures/fig_q2_algorithm.pdf}
+	\caption{问题二求解框架}
 	\label{fig:q2-algorithm}
 \end{figure}
 
