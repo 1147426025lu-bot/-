@@ -1,0 +1,80 @@
+% 支撑材料：AI 工具使用详情（依《人工智能工具及输出使用规定》第 6 条）
+% 提交前请补全「版本发布日期」，并据实增删使用记录，不得编造。
+\documentclass[12pt,a4paper]{ctexart}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+
+\renewcommand{\arraystretch}{1.5}
+\pagestyle{plain}
+
+\begin{document}
+
+\begin{center}
+	{\zihao{2}\bfseries AI 工具使用详情}
+\end{center}
+
+\vspace{1em}
+\noindent 本参赛队在竞赛过程中使用了人工智能工具辅助答题，使用情况如实记录如下。
+
+\begin{longtable}{>{\bfseries\raggedright\arraybackslash}p{3.8cm}p{11.2cm}}
+	\toprule
+	记录项目 & 内容 \\
+	\midrule
+	\endfirsthead
+	\toprule
+	记录项目 & 内容 \\
+	\midrule
+	\endhead
+	\bottomrule
+	\endfoot
+
+	工具名称 & DeepSeek \\
+	版本或型号 & DeepSeek V4.1 Flash（API 模型名 \texttt{deepseek-flash}） \\
+	开发机构/公司 & 杭州深度求索人工智能基础技术研究有限公司 \\
+	版本发布日期 & 2026 年 9 月 10 日 \\
+	使用方式 & 通过 MathModel 桌面客户端调用，会话式交互 \\
+	\midrule
+	使用目的与环节一：建模分析 &
+	用于梳理四个子问题之间的数据继承关系，讨论把地形净空、等效航程与双向链路预算统一为公共物理口径的可行性，
+	以及确认“单点能力评估—多机调度—通信协同—资源分区”的递进求解框架。 \\
+	主要提示与过程 &
+	提交题面文本、附件数据字段说明与自拟的分析提纲，请工具指出约束之间的耦合点（如载荷递减对航段能耗的影响、
+	共享电池周转对调度时刻的制约），并给出可选的建模路线对比。 \\
+	采纳与核验 &
+	仅采纳“先统一公共物理模型、再逐问递进”的组织思路；全部模型方程与约束条件由本队依据题面自行推导确定，
+	关键结论（如 C 型机在 S008 的最大安全载荷）均由本队脚本独立复算核对。 \\
+	\midrule
+	使用目的与环节二：程序编写与调试 &
+	用于编写与排错 Python 求解脚本（\texttt{code/} 目录下的 core.py、q1.py、q2.py、q3.py、q4.py、figures.py、make\_roadmap.py、render\_drawio.py），
+	涉及 DEM 采样与视线遮挡判定、二分法求最大安全载荷、FFD 装箱、离散事件调度与贪心集合覆盖等。 \\
+	主要提示与过程 &
+	提供报错信息、相关函数片段与期望输出，请工具分析原因并给出修改建议；对算法结构性问题（如调度回环的终止条件）
+	要求给出伪代码后再讨论。 \\
+	采纳与核验 &
+	代码由本队在工具建议基础上重新组织并逐行审阅；全部脚本可独立重复运行，结果写入 \texttt{results/*.csv}，
+	与论文中所列数值一致。各脚本首部已按《规定》第 5 条加注工具信息。 \\
+	\midrule
+	使用目的与环节三：图表与排版 &
+	用于生成论文统计图（matplotlib/seaborn）与示意图（draw.io），以及 \LaTeX{} 排版与编译排错。 \\
+	主要提示与过程 &
+	说明图表要表达的数据与结论，请工具给出绘图代码；示意图先确定版式与层级关系，再生成图形文件。 \\
+	采纳与核验 &
+	图表所依据的数据全部来自本队脚本输出，工具仅参与呈现方式；图形文件与中间产物均保存在 \texttt{figures/} 目录，
+	可追溯生成过程。 \\
+	\midrule
+	使用目的与环节四：论文写作 &
+	用于语言润色与行文组织的辅助。 \\
+	采纳与核验 &
+	最终呈现在论文中的文字均由本队使用自身语言表述，并逐段审核；文献引用均经检索核实，
+	未采用无法确认来源的模型或公式。 \\
+	\bottomrule
+\end{longtable}
+
+\vspace{1em}
+\noindent\textbf{声明：}本参赛队对上述记录的真实性负责。人工智能工具仅作为辅助手段，本文的建模思路、
+模型建立、结果分析与结论均由参赛队员独立完成并经复核。
+
+\end{document}

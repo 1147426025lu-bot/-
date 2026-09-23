@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "managedBy": "mathmodel",
+  "template": {
+    "id": "cumcm",
+    "name": {
+      "zh-CN": "国赛 CUMCM",
+      "en": "CUMCM"
+    },
+    "entryFile": "document.tex",
+    "source": "builtin",
+    "sourcePath": null
+  },
+  "contestFields": [],
+  "teamProfile": null
+}

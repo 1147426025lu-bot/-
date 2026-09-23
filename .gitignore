@@ -1,0 +1,35 @@
+# 本仓库只收录自行产出的源码、论文与结果；
+# 赛题下发材料与第三方字体不在此公开转发。
+
+# === 赛题下发的原始数据与题面 ===
+数据/
+problem.txt
+problem_full.txt
+
+# === 第三方商业字体（方正隶书，授权不允许再分发）===
+LiSu.ttf
+
+# === 打包产物（可由 build_submission.py 重建）===
+提交包/
+
+# === LaTeX 编译中间文件 ===
+main.aux
+main.log
+main.out
+main.toc
+*.synctex.gz
+
+# === 个人杂项 ===
+clean.bat
+常用LaTex代码指令.txt
+
+# === Python 字节码缓存 ===
+__pycache__/
+*.py[cod]
+
+# === 系统 / 编辑器 ===
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/

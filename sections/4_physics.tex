@@ -1,0 +1,68 @@
+\section{公共物理模型}
+
+四个问题共享同一套地形感知飞行、能耗与通信物理模型，本节统一给出，保证计算口径一致。
+
+\subsection{地形净空与航段几何}
+
+任意两节点 $i,j$ 间采用水平直线航段。设节点地理坐标为经纬度 $(\lambda,\varphi)$，先按局部平面投影换算为水平距离。地形高程取自 30\,m 分辨率的 Copernicus 全球数字高程模型\cite{copernicus2024dem}。计划巡航海拔取该航段所经过 DEM 像元的最高地面高程再加 50\,m，即
+\begin{equation}
+	H_{ij}^{\mathrm{cruise}} = \max_{(u,v)\in \mathcal{C}(\overline{ij})} z_{\mathrm{DEM}}(u,v) + 50,
+	\label{eq:cruise-alt}
+\end{equation}
+其中 $\mathcal{C}(\overline{ij})$ 为航段 $\overline{ij}$ 所\textbf{穿过}的 30\,m DEM 像元集合（由栅格遍历确定，见 \ref{sec:dem-caliber} 节），$z_{\mathrm{DEM}}(u,v)$ 为像元 $(u,v)$ 的\textbf{原始}高程，而非对插值面采样所得的值。起终点作业高度取：O01 为其地面海拔 $H_{O}$，服务区 $S_i$ 为其地面海拔以上 30\,m。于是爬升、下降高度为
+\begin{equation}
+	h^{+}_{ij}=\max\!\big(H_{ij}^{\mathrm{cruise}}-H_i^{\mathrm{op}},0\big),\quad
+	h^{-}_{ij}=\max\!\big(H_{ij}^{\mathrm{cruise}}-H_j^{\mathrm{op}},0\big).
+	\label{eq:climb-desc}
+\end{equation}
+
+\subsection{等效航程、飞行时间与能耗}
+
+机型 $g$ 携带载荷 $q$ 的等效航程采用题给的 3/2 次幂载荷—航程关系式：
+\begin{equation}
+	L_g(q)=L_{g0}-\big(L_{g0}-L_{gF}\big)\Big(\frac{q}{Q_g}\Big)^{3/2},\quad 0\le q\le Q_g.
+	\label{eq:range}
+\end{equation}
+航段 $i\to j$ 的飞行时间按爬升、巡航、下降三段累加：
+\begin{equation}
+	t_{gij}=\frac{h^{+}_{ij}}{v^{\uparrow}_g}+\frac{d_{ij}}{v^{c}_g}+\frac{h^{-}_{ij}}{v^{\downarrow}_g}.
+	\label{eq:flight-time}
+\end{equation}
+航段运输能耗按水平巡航能耗与爬升附加能耗之和计算。其中水平巡航能耗由等效航程反推（满电池能量 $E_g^{\mathrm{use}}$ 对应空载/满载标准航程，单位水平距离能耗与等效航程成反比），爬升附加能耗取重力势能除以爬升能耗效率 $\eta^{\uparrow}_g$。这一“水平距离项＋爬升势能项”的分解方式与多旋翼货运无人机能耗建模的通行做法一致\cite{zhang2021energy}：
+\begin{equation}
+	E_{gij}(q)=E_g^{\mathrm{use}}\frac{d_{ij}}{L_g(q)}
+	+\frac{1}{3.6\times10^{6}}\cdot\frac{(m_g^{\mathrm{empty}}+q)\,g\,h^{+}_{ij}}{\eta^{\uparrow}_g},
+	\label{eq:leg-energy}
+\end{equation}
+其中 $m_g^{\mathrm{empty}}$ 为含电池空载总质量（按题给三机型参数取值\cite{dji2024m350}），$g$ 为重力加速度。第一项由能量与航程之比得出，量纲已是 kWh；第二项按 $mgh/\eta$ 算出的是焦耳，故除以 $3.6\times10^{6}$ 折算为 kWh 后再相加，两项方可同量纲求和。下降能耗效率取 0，不单独计算下降附加能耗。每一运输架次 $p$ 需满足返航安全余量
+\begin{equation}
+	E_p^{T}=\sum_{(i,j)\in p}E_{gij}(q_{pij})\le (1-\rho_g)\,E_g^{\mathrm{use}},
+	\label{eq:energy-margin}
+\end{equation}
+其中 $q_{pij}$ 为架次 $p$ 在航段 $i\to j$ 上的剩余载荷（随沿途投送递减）。
+
+\subsection{电池与能源组件充电周转}
+
+共享电池与中继能源组件作为独立能源资源记录荷电状态（SOC）。任务结束 SOC 为 $s$ 的资源充电至 100\% 所需时间按题给两阶段等效充电模型（快充段占等效完全充电时间的 65\%，慢充段占 35\%，各阶段按 SOC 增量线性折算；这与锂离子电池充电器“恒流—恒压”两阶段策略的工程实践相符\cite{ti2017charger}）：
+\begin{equation}
+	t_{\mathrm{chg}}(s)=
+	\begin{cases}
+		T_{\mathrm{full}}\Big[0.65\dfrac{0.90-s}{0.90}+0.35\Big], & 0\le s<0.90,\\[4pt]
+		T_{\mathrm{full}}\cdot 0.35\dfrac{1-s}{0.10}, & 0.90\le s\le 1.
+	\end{cases}
+	\label{eq:charging}
+\end{equation}
+任务结束后剩余 SOC 为 $s=1-E_p^{T}/E_g^{\mathrm{use}}$，再次投入任务前须充至 100\%。
+
+\subsection{通信链路模型}
+\label{sec:link-model}
+
+通信系统由固定网关 G01（设于 O01，天线离地 20\,m）、运输无人机与中继无人机组成。任意两端点 $a,b$ 之间，先判定视线连线是否被 DEM 地形遮挡（记遮挡变量 $b_{ab}\in\{0,1\}$），再按 ITU-R P.525 建议书计算自由空间传播损耗\cite{itu2024p525}，并叠加遮挡附加损耗：
+\begin{equation}
+	L^{\mathrm{FSPL}}_{ab}=32.45+20\lg f + 20\lg D_{ab},\qquad
+	L^{\mathrm{path}}_{ab}=L^{\mathrm{FSPL}}_{ab}+L_{\mathrm{obs}}\,b_{ab},
+	\label{eq:pathloss}
+\end{equation}
+其中 $f$ 为载波频率（MHz），$D_{ab}$ 为两端点三维直线距离（km），$L_{\mathrm{obs}}$ 为遮挡附加损耗。双向链路门限取两个方向最大允许损耗的较小值 $L^{\max}_{a\leftrightarrow b}=\min(L^{\max}_{a\to b},L^{\max}_{b\to a})$，链路可用当且仅当 $L^{\mathrm{path}}_{ab}\le L^{\max}_{a\leftrightarrow b}$。运输无人机的通信状态按“直连 G01 可用 → 直连；否则接入链路与回传链路同时可用 → 中继；否则中断”的规则判定。
+
+三态占比一律按\textbf{时间积分}统计：以 $\Delta t=1$\,s 离散化轨迹，第 $i$ 个采样点取权重 $w_i=(t_{i+1}-t_{i-1})/2$，再按状态加权累加，故占比是时间占比而非采样点个数占比——轨迹在爬升、巡航、悬停交接各段的采样密度并不相同，按点数统计会系统性偏向采样更密的阶段。判定「中继」时须同时满足两个条件：该悬停站此刻\textbf{确实能连通}这架运输机（逐点计算接入链路的路径损耗与门限），且对应的中继架次此刻已完成建链、尚未结束服务。只检查时刻是否落在某个在役中继的时间窗内是不够的——那会把「站在服务、但几何上够不着」的时段误记为已覆盖，从而虚高中继覆盖率。\label{sec:comm-caliber}
