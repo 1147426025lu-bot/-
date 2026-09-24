@@ -21,8 +21,14 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
 from matplotlib.patches import Patch, Rectangle
+from matplotlib.lines import Line2D
 from matplotlib.transforms import offset_copy
 import seaborn as sns
+
+# 只复用 core 的两阶段充电公式与机型/电池参数表——是「读参数、套论文 §4 的公式」，
+# 不是在此重算模型：架次时刻、机型与电池指派一律来自 results/*.csv。
+from core import (charge_time, load_transport_uav_types, load_batteries,
+                  load_relay_type, load_relay_batteries)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.join(HERE, '..')
@@ -958,6 +964,291 @@ def fig_q4_partition():
     save(fig, 'fig_q4_partition.png')
 
 
+# ---------------------------------------------------------------- 模型检验（§9）
+
+# 四类资源的固定呈现顺序与配色，图 9.x 的 y 轴分组线与图例都取自此表
+RES_CLASSES = [('uav:',  '运输无人机',   C_A),
+               ('bat:',  '共享电池',     C_B),
+               ('RUAV:', '中继无人机',   C_C),
+               ('RBAT:', '中继能源组件', '#E8A33D')]
+RES_COLOR = {p: c for p, _n, c in RES_CLASSES}
+
+
+def _resource_usage():
+    """从 results/*.csv 重建「资源 → 占用区间」，口径与 code/q2.py、code/q3.py 逐行一致。
+
+    不重算模型：架次时刻、机型与电池/组件指派一律读 CSV。唯一借用的模型要素是
+    core.charge_time()——那是论文 §4 的两阶段充电公式本身，与 §9 表 9.2 脚注
+    「返回时刻＋按能耗反算的充电时长」是同一句定义，复用而非另写一份。
+
+    占用口径（右端一律取 CSV 的「返回O01时刻s」）：
+      运输无人机  [t0, t1]                  q2.py: u['free_at']    = start + duration
+      共享电池    [t0, t1 + 充电时长]        q2.py: bat['ready_at'] = 上式 + t_chg
+      中继无人机  [t0, t1 + turnover]        q3.py: r['free_at']    = t_start + t_tot + turnover
+      中继组件    [t0, t1 + 充电时长]        q3.py: c['ready_at']   = 上式 + charge_time(...)
+    运输架次按 q3_stagger.csv 的错峰量整体平移，与问题三的最终推荐方案一致。
+    """
+    tt = load_transport_uav_types()
+    bats = load_batteries()
+    rt = load_relay_type()
+    _n_rc, tf_r = load_relay_batteries()
+
+    trips = rd('q2_transport_trips.csv')
+    stag = rd('q3_stagger.csv')
+    rel = rd('q3_relay_trips.csv')
+    off = dict(zip(stag['架次编号'], stag['推迟s']))
+
+    use = {}
+    for _, r in trips.iterrows():
+        tid, g = r['架次编号'], r['机型编号']
+        t0 = float(r['开始时刻s']) + float(off[tid])
+        t1 = t0 + (float(r['返回O01时刻s']) - float(r['开始时刻s']))
+        soc = 1.0 - float(r['架次能耗kWh']) / tt[g]['E_use']
+        use.setdefault(('uav:', r['无人机编号']), []).append((t0, t1, tid))
+        use.setdefault(('bat:', r['电池编号']), []).append(
+            (t0, t1 + charge_time(soc, bats[g][1]), tid))
+    for _, r in rel.iterrows():
+        t0, t1 = float(r['开始时刻s']), float(r['返回O01时刻s'])
+        soc = 1.0 - float(r['架次能耗kWh']) / rt['E_use']
+        use.setdefault(('RUAV:', r['中继无人机编号']), []).append(
+            (t0, t1 + rt['turnover'], r['中继架次编号']))
+        use.setdefault(('RBAT:', r['能源组件编号']), []).append(
+            (t0, t1 + charge_time(soc, tf_r), r['中继架次编号']))
+    return {k: sorted(v) for k, v in use.items()}
+
+
+def _ordered_keys(use):
+    """按 RES_CLASSES 的类别顺序、类内按编号排序——刻意不用 set 迭代，保证逐字节可复现。"""
+    return [k for pre, _n, _c in RES_CLASSES for k in sorted(x for x in use if x[0] == pre)]
+
+
+def _min_gap(ivs):
+    """相邻占用区间的最小间隙；只占用一次的资源返回 None（无周转）。"""
+    return min((y[0] - x[1] for x, y in zip(ivs, ivs[1:])), default=None)
+
+
+def fig_resource_conflict():
+    """资源占用矩阵与周转间隙（图 9.x）。
+
+    本图兼作 §9.1 三张检验表的**图示复核**：重叠数与最小间隙在此由 CSV 独立重算，
+    必须与表 9.2/9.4 报告的「重叠 0 处」「最小间隙 +4×10^-4 s」一致；不一致说明
+    占用口径与求解器不符，此处直接断言失败，而不是把图调好看。
+    """
+    from matplotlib.colors import ListedColormap
+
+    use = _resource_usage()
+    keys = _ordered_keys(use)
+
+    n_ov = sum(1 for k in keys for x, y in zip(use[k], use[k][1:]) if y[0] < x[1] - 1e-6)
+    # 只占用一次的资源没有相邻间隙（_min_gap 返回 None），统计时须剔除
+    gb = [g for g in (_min_gap(use[k]) for k in keys if k[0] == 'bat:') if g is not None]
+    gap_bat = min(gb)
+    n_once = sum(1 for k in keys if _min_gap(use[k]) is None)
+    print('[自校验] 资源数 = %d，重叠处数 = %d，共享电池最小间隙 = %+.6e s（%d/%d 组电池有周转）'
+          % (len(keys), n_ov, gap_bat, len(gb), sum(1 for k in keys if k[0] == 'bat:')))
+    print('[自校验] 全场仅占用一次的资源 = %d 个' % n_once)
+    assert n_ov == 0, '重建出的占用存在重叠 %d 处：口径与求解器不一致' % n_ov
+    assert 0.0 <= gap_bat < 1.0, '电池最小间隙 %.3e s 不在预期的亚秒量级' % gap_bat
+
+    # ---- (a) 资源×时间占用矩阵 ----
+    tmax = max(iv[1] for k in keys for iv in use[k])
+    binw = 120.0
+    nbin = int(math.ceil(tmax / binw))
+    M = np.zeros((len(keys), nbin))
+    for i, k in enumerate(keys):
+        ci = [p for p, _n, _c in RES_CLASSES].index(k[0]) + 1
+        for t0, t1, _lab in use[k]:
+            a = max(0, int(t0 // binw))
+            b = min(nbin - 1, int((t1 - 1e-9) // binw))
+            M[i, a:b + 1] = ci
+
+    fig, (axa, axb) = plt.subplots(
+        1, 2, figsize=(10.4, 6.8),
+        gridspec_kw=dict(width_ratios=[3.0, 1.3], wspace=0.05))
+
+    cmap = ListedColormap(['#F4F4F4'] + [c for _p, _n, c in RES_CLASSES])
+    axa.imshow(M, aspect='auto', cmap=cmap, vmin=0, vmax=4, interpolation='nearest',
+               extent=[0, nbin * binw, len(keys) - 0.5, -0.5])
+    acc = 0
+    for pre, _n, _c in RES_CLASSES[:-1]:
+        acc += sum(1 for k in keys if k[0] == pre)
+        axa.axhline(acc - 0.5, color='white', lw=2.4)
+        axa.axhline(acc - 0.5, color='#333333', lw=0.8)
+    axa.grid(False)
+    axa.set_xlabel('时间（s）')
+    axa.set_yticks(list(range(len(keys))))
+    axa.set_yticklabels([k[1] for k in keys], fontsize=8.5)
+    for tick, k in zip(axa.get_yticklabels(), keys):
+        tick.set_color(RES_COLOR[k[0]])
+    axa.set_title('资源占用矩阵')
+    panel_tag(axa, '(a)')
+    # 图例移到坐标区外下方：放区内会压住 U05/U06 那几段占用块
+    axa.legend(handles=[Patch(facecolor=RES_COLOR[p], label=n) for p, n, _c in RES_CLASSES],
+               loc='upper center', bbox_to_anchor=(0.5, -0.105),
+               ncol=4, frameon=False, fontsize=10.5)
+
+    # ---- (b) 各资源最小周转间隙 ----
+    ys = list(range(len(keys)))
+    gaps = [_min_gap(use[k]) for k in keys]
+    axb.barh(ys, [0.0 if g is None else g for g in gaps],
+             color=[RES_COLOR[k[0]] for k in keys], height=0.62, alpha=0.92)
+    # 仅占用一次的资源没有「相邻间隙」。**不能留空**——空行与「间隙恰为 0」的零长
+    # 条形在视觉上完全一样，而本题确有多架无人机是 0 间隙紧接续，留空会被读成后者。
+    # 用一个离散的灰色 ×（而非条形/色带）标记，形状上不可能与间隙数值混淆。
+    once = [y for y, g in zip(ys, gaps) if g is None]
+    if once:
+        axb.plot([0.02] * len(once), once, transform=axb.get_yaxis_transform(),
+                 ls='none', marker='x', ms=6, mew=1.5, color='#ADADAD', zorder=5)
+    # linthresh 取 1e-4 而非 1：本题最紧的电池间隙只有 4.3e-4 s，若阈值取 1 则该值
+    # 落在对称对数的线性段里、贴着 0 画成一粒看不见的点，与「间隙恰为 0」无法区分。
+    # 取 1e-4 后 4.3e-4 进入对数段，成为一根肉眼可辨的短条，最紧资源才看得出来。
+    axb.set_xscale('symlog', linthresh=1e-4)
+    # 刻度必须显式给plain十进制：对称对数的默认刻度走 mathtext，负指数会渲染成
+    # 「10⁻³」的上标减号 U+2212，而 SimSun 无此字形，XeTeX 静默丢字、matplotlib
+    # 则替换成 dummy 方框——两种结局都是图上出现豆腐块。写死标签即可绕开。
+    axb.set_xticks([0, 1e-3, 1e-1, 1e1, 1e3])
+    axb.set_xticklabels(['0', '0.001', '0.1', '10', '1000'])
+    axb.axvline(0.0, color=C_OUT, ls='--', lw=1.5)
+    axb.set_ylim(len(keys) - 0.5, -0.5)
+    axb.set_yticks([])
+    axb.tick_params(left=False)
+    axb.set_xlabel('最小周转间隙（s）')
+    axb.set_title('周转间隙与冲突阈值')
+    axb.text(0.97, 0.02, '红色虚线 = 冲突阈值 0 s\n全部资源均在其右侧',
+             transform=axb.transAxes, ha='right', va='bottom', fontsize=9.5, color=C_OUT)
+    if once:
+        axb.legend(handles=[Line2D([], [], ls='none', marker='x', ms=6, mew=1.5,
+                                   color='#ADADAD', label='仅占用一次（无周转）')],
+                   loc='upper center', bbox_to_anchor=(0.5, -0.105),
+                   frameon=False, fontsize=10.5)
+    panel_tag(axb, '(b)')
+
+    fig.tight_layout()
+    save(fig, 'fig_resource_conflict.png')
+
+
+def fig_solution_network():
+    """跨问题方案网络：服务区 → 运输架次 → 机型／中继悬停站（图 9.x）。
+
+    四层连边全部由独立脚本产出的 CSV 还原：服务区—架次与架次—机型取自
+    q2_transport_trips.csv，架次—悬停站取自 q3_comm_phases.csv ⋈ q3_relay_trips.csv。
+
+    **不使用任何 nx.*_layout**：networkx 3.7 的 subgraph 视图迭代 set，布局会随
+    PYTHONHASHSEED 漂移、破坏逐字节可复现（fig_q4_partition 内已记录过同类事故）。
+    此处四列 x 固定、y 由**已排序**节点表按序号等分算得，pos 一律显式传入。
+    """
+    import networkx as nx
+
+    trips = rd('q2_transport_trips.csv')
+    rtrips = rd('q3_relay_trips.csv')
+    phases = rd('q3_comm_phases.csv')
+
+    zones = sorted({z for s in trips['访问服务区顺序'] for z in str(s).split('->')})
+    tids = sorted(trips['架次编号'])
+    types = sorted(set(trips['机型编号']))
+    stations = sorted(set(rtrips['悬停站编号']))
+
+    z2t, t2type = [], {}
+    for _, r in trips.iterrows():
+        t2type[r['架次编号']] = r['机型编号']
+        for z in str(r['访问服务区顺序']).split('->'):
+            z2t.append((z, r['架次编号']))
+    bind = phases[phases['中继架次编号'].notna()][['运输架次编号', '中继架次编号']].drop_duplicates()
+    bind = bind.merge(rtrips[['中继架次编号', '悬停站编号']], on='中继架次编号')
+    t2st = sorted(set(zip(bind['运输架次编号'], bind['悬停站编号'])))
+
+    ez = sorted({(('z', z), ('t', t)) for z, t in z2t})
+    # 注意：order 是「按机型分组」后的次序，与 tids（T01…T20）不同。eg 与 edge_color
+    # 必须取同一个 order，否则颜色与边一一错位（曾因此画出「蓝色架次配绿色机型边」）。
+    order = sorted(tids, key=lambda t: (t2type[t], t))
+    eg = [(('t', t), ('g', t2type[t])) for t in order]
+    print('[自校验] 服务区=%d 架次=%d 机型=%d 悬停站=%d | 边 服务区-架次=%d（去重前 %d）架次-机型=%d 架次-悬停站=%d'
+          % (len(zones), len(tids), len(types), len(stations), len(ez), len(z2t), len(eg), len(t2st)))
+    assert (len(zones), len(tids), len(types), len(stations)) == (15, 20, 3, 3)
+    # 服务区访问共 z2t 次；去重后少掉的边是「两个不同架次访问了同一对服务区」
+    assert len(ez) == len(set(z2t)) and len(eg) == len(tids)
+
+    G = nx.Graph()
+    G.add_edges_from(ez)
+    G.add_edges_from(eg)
+    G.add_edges_from([(('t', t), ('s', s)) for t, s in t2st])
+
+    # 架次列**按机型分组排序**而不是按编号：这样「架次→机型」的连线成为三段互不交叉
+    # 的平行束。若按 T01…T20 排，每一条架次→机型边都要横穿整个架次列，右侧会糊成一团。
+    Y, X0, X1, X2, X3 = 15.0, 0.0, 1.25, 2.45, 3.30
+    pos = {}
+    for i, z in enumerate(zones):
+        pos[('z', z)] = (X0, Y - i * (Y / max(1, len(zones) - 1)))
+    yt = {t: Y - i * (Y / max(1, len(order) - 1)) for i, t in enumerate(order)}
+    for t in order:
+        pos[('t', t)] = (X1, yt[t])
+    for g in types:
+        yy = [yt[t] for t in order if t2type[t] == g]
+        pos[('g', g)] = (X2, sum(yy) / len(yy))
+    # 悬停站落在其所服务架次的纵坐标重心上，并强制彼此至少错开 1.35 个单位
+    ysrv = {}
+    for s in stations:
+        yy = [yt[t] for t, ss in t2st if ss == s]
+        ysrv[s] = sum(yy) / len(yy) if yy else 0.0
+    sorder = sorted(stations, key=lambda s: -ysrv[s])
+    for i, s in enumerate(sorder):
+        if i:
+            ysrv[s] = min(ysrv[s], ysrv[sorder[i - 1]] - 1.35)
+    for s in stations:
+        pos[('s', s)] = (X3, ysrv[s])
+
+    fig, ax = plt.subplots(figsize=(10.6, 6.9))
+    nx.draw_networkx_edges(G, pos, edgelist=ez, ax=ax,
+                           edge_color='#D8D8D8', width=0.8, alpha=0.9)
+    nx.draw_networkx_edges(G, pos, edgelist=[(('t', t), ('s', s)) for t, s in t2st], ax=ax,
+                           edge_color=C_OUT, width=1.1, alpha=0.6, style='dashed')
+    nx.draw_networkx_edges(G, pos, edgelist=eg, ax=ax,
+                           edge_color=[TYPE_COLOR[t2type[t]] for t in order], width=1.6, alpha=0.85)
+
+    nx.draw_networkx_nodes(G, pos, nodelist=[('z', z) for z in zones], ax=ax,
+                           node_size=65, node_color='#D9D9D9',
+                           edgecolors='#8A8A8A', linewidths=0.7)
+    nx.draw_networkx_nodes(G, pos, nodelist=[('t', t) for t in order], ax=ax,
+                           node_size=95, node_color=[TYPE_COLOR[t2type[t]] for t in order],
+                           edgecolors='white', linewidths=0.7)
+    nx.draw_networkx_nodes(G, pos, nodelist=[('g', g) for g in types], ax=ax,
+                           node_size=1250, node_color=[TYPE_COLOR[g] for g in types],
+                           edgecolors='white', linewidths=1.1)
+    nx.draw_networkx_nodes(G, pos, nodelist=[('s', s) for s in stations], ax=ax,
+                           node_size=1250, node_color=C_OUT, edgecolors='white',
+                           linewidths=1.1, node_shape='s')
+
+    # 标签一律加白底 bbox：架次编号写在架次列左侧，正好压在灰线上，不加底会糊
+    bbox = dict(facecolor='white', edgecolor='none', alpha=0.72, pad=0.9)
+    for z in zones:
+        ax.text(X0 - 0.075, pos[('z', z)][1], z, ha='right', va='center',
+                fontsize=10.5, color='#333333')
+    for t in order:
+        ax.text(X1 - 0.085, yt[t], t, ha='right', va='center',
+                fontsize=9.5, color='#333333', bbox=bbox)
+    nx.draw_networkx_labels(G, pos, labels={('g', g): g + ' 型' for g in types}, ax=ax,
+                            font_size=12, font_color='white')
+    nx.draw_networkx_labels(G, pos, labels={('s', s): s for s in stations}, ax=ax,
+                            font_size=11.5, font_color='white')
+    for x, lab in [(X0, '服务区（%d）' % len(zones)), (X1, '运输架次（%d）' % len(tids)),
+                   (X2, '机型（按机型分组）'), (X3, '悬停站')]:
+        ax.text(x, Y + 1.15, lab, ha='center', va='bottom',
+                fontsize=12.5, fontweight='bold', color='#333333')
+
+    # 图例放到坐标区上方：放左下会正好盖住 S015 的标签
+    ax.legend(handles=[Line2D([], [], color='#C4C4C4', lw=1.6, label='服务区 → 架次（访问顺序）'),
+                       Line2D([], [], color=TYPE_COLOR['C'], lw=1.8, label='架次 → 机型'),
+                       Line2D([], [], color=C_OUT, lw=1.4, ls='--', label='架次 → 悬停站（中继保障）')],
+              loc='lower center', bbox_to_anchor=(0.5, -0.055),
+              ncol=3, frameon=False, fontsize=10.5)
+    ax.set_xlim(-0.95, X3 + 0.55)
+    ax.set_ylim(-1.1, Y + 2.3)
+    ax.axis('off')
+    ax.grid(False)
+    fig.tight_layout()
+    save(fig, 'fig_solution_network.png')
+
+
 def main():
     fig_q1_pareto()
     fig_q1_payload()
@@ -969,6 +1260,8 @@ def main():
     fig_q3_analysis()
     fig_q4_resource()
     fig_q4_partition()
+    fig_resource_conflict()
+    fig_solution_network()
     print('全部升级版配图已生成 ->', FIG)
 
 
