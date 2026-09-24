@@ -1,0 +1,17 @@
+q2 方案记录哈希刷新说明（人工干预，非重新求解）
+时间：2026-09-24 21:12:59
+原因：q2 跑完后为修问题三导出崩掉的一行改了 code/solution_io.py；
+      该文件同时计入 Q2_SOLVER_FILES，q2 记录因此被判过期。
+改动位置：solution_io.build_q3_solution 的 metrics 类型转换；
+          q2 的求解与导出路径不调用该函数（人工判断，非重跑复现）。
+
+solution_id: q2-202f97bbe341 -> q2-b32c5300608f
+
+solver_hashes 变化项：code/solution_io.py
+  code/solution_io.py
+    旧 e782ba6129a94e911924f386510d5680ea70fdc9d3f4f6743256ac4b4bfb825b
+    新 7eb9ed50b3e16e1b059de391b1c1c834fb255d6027150f6195fe13bc5e45e474
+
+内容复核：架次数、架次编号、逐架次能耗、逐箱交付数均与
+          results/q2_transport_trips.csv、results/q2_box_delivery.csv 一致。
+未复核：重跑一次 q2（约 43 分钟）能否复现同一份方案——未做。

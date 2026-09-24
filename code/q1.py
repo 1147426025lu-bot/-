@@ -37,6 +37,7 @@
 """
 import os
 import sys
+import time
 from functools import lru_cache
 
 try:                                    # 中文控制台输出
@@ -328,6 +329,173 @@ def reconstruct(dp, k):
 
 
 # ---------------------------------------------------------------------------
+# 3b. 混合机型：三目标标签 DP（允许同一服务区混用机型）
+# ---------------------------------------------------------------------------
+def type_patterns(d, si_id, tid, classes):
+    """
+    机型 tid 在该服务区的全部可行架次模式，**逐模式**真算能耗与作业时间。
+
+    与单机型 DP 的差别在这里：混合机型下总作业时间 sum_j T_j 不再是架次数的仿射
+    函数（不同机型的航段速度与准备/交接时间不同），故每个模式都自带 duration。
+    「事实 3」只在**同一机型内**成立，本函数与 trip_duration() 一致。
+
+    返回 (patterns, 不可达原因)。不可达是**显式判定**的，不靠二分法返回近 0 载荷
+    再让模式枚举碰巧为空来隐含表达。
+    """
+    t = d.transport_types[tid]
+    si = d.si[si_id]
+    usable = (1.0 - t['rho']) * t['E_use']
+    E0, go, back = roundtrip_energy(t, d.dem, d.O01, si, 0.0)
+    if E0 > usable:
+        return [], ('空载往返能耗 %.4f kWh 已超过可用能量 %.4f kWh' % (E0, usable))
+    qmax = min(max_safe_payload(d, t, si), t['Q'])
+    m_min = min(c[0] for c in classes)
+    if qmax + EPS < m_min:
+        return [], ('最大安全载荷 %.3f kg 低于该区最轻货箱 %.3f kg' % (qmax, m_min))
+    pats = []
+    for counts, mass, vol in enumerate_class_patterns(classes, qmax, t['volume']):
+        E = roundtrip_energy(t, d.dem, d.O01, si, mass)[0]
+        if E > usable + 1e-9:
+            # 二分求根的舍入残差导致理论上恰好卡边的模式略微越限；宁可丢掉该模式
+            # （可能少一个可行解），也不让它以「可行」的面目进入前沿
+            continue
+        pats.append(dict(counts=counts, mass=mass, vol=vol, type=tid, E=E,
+                         T=trip_duration(d, t, si, sum(counts), go, back)))
+    if not pats:
+        return [], '该机型无任何可行架次模式'
+    return pats, None
+
+
+def dp_area_mixed(d, si_id, types=TYPES):
+    """
+    该服务区在**允许混用机型**下的精确前沿：每个架次数 k 给出非支配 (能耗, 时间) 标签集。
+
+    标签 DP：状态 = 各类货箱剩余件数元组；标签 = (累计能耗 E, 累计作业时间 T)，
+    并记录「最后一个模式 + 前驱状态」以便回溯。
+
+    关键在于**每个 (状态, k) 保留整条非支配标签集**，而不是只留能耗最小的那一个。
+    混合机型下不同机型的能耗与时间是两条独立的权衡轴（A 型慢而省、C 型快而费），
+    只留标量最小值会把时间更优的方案整支剪掉，那样得到的就不是前沿（F02 的实质）。
+
+    规范形：每步必须取走「当前剩余箱中类序号最小的一类」至少一件，保证每个划分
+    恰被枚举一次（与单机型 DP 同一套约定，结果可直接与 dp_area() 对照）。
+
+    返回 dict(front={k: [(E,T), ...]}, labels={k: [标签, ...]}, pats, classes,
+    unreachable={机型: 原因}, n_states, n_patterns)；无任何可行模式返回 None。
+    """
+    si = d.si[si_id]
+    boxes = d.boxes_by_service[si_id]
+    classes = box_classes(boxes)
+    n_states = 1
+    for c in classes:
+        n_states *= (c[2] + 1)
+    if n_states > STATE_CAP:
+        raise RuntimeError('服务区 %s 多重集状态数 %d 超过上限，需改用集合划分 ILP'
+                           % (si_id, n_states))
+
+    pats, unreachable = [], {}
+    for tid in types:
+        p, why = type_patterns(d, si_id, tid, classes)
+        if why:
+            unreachable[tid] = why
+        pats.extend(p)
+    if not pats:
+        return None
+    nc = len(classes)
+    full = tuple(c[2] for c in classes)
+
+    memo = {}
+
+    def solve(state):
+        """{k: [标签, ...]}；标签 = (E, T, 模式下标, 前驱状态, 前驱k, 前驱标签下标)。"""
+        if state in memo:
+            return memo[state]
+        if not any(state):
+            memo[state] = {0: [(0.0, 0.0, None, None, None, None)]}
+            return memo[state]
+        low = next(i for i in range(nc) if state[i] > 0)
+        acc = {}
+        for pi, p in enumerate(pats):
+            cnt = p['counts']
+            if cnt[low] == 0:
+                continue                       # 规范形：必含最小非空类
+            if any(cnt[i] > state[i] for i in range(nc)):
+                continue
+            sub_state = tuple(state[i] - cnt[i] for i in range(nc))
+            for k, labels in solve(sub_state).items():
+                bucket = acc.setdefault(k + 1, [])
+                for li, lab in enumerate(labels):
+                    bucket.append((lab[0] + p['E'], lab[1] + p['T'], pi,
+                                   sub_state, k, li))
+        out = {}
+        for k, lst in acc.items():
+            # 支配剪枝：按 E 升序扫描，只保留 T 严格更优的点 ⇒ 剩下的两两互不支配
+            lst.sort(key=lambda x: (x[0], x[1]))
+            kept, best_T = [], float('inf')
+            for cand in lst:
+                if cand[1] < best_T - 1e-6:
+                    kept.append(cand)
+                    best_T = cand[1]
+            out[k] = kept
+        memo[state] = out
+        return out
+
+    labels = solve(full)
+    if not labels:
+        return None
+    front = {k: [(lab[0], lab[1]) for lab in v] for k, v in labels.items()}
+    return dict(front=front, labels=labels, memo=memo, pats=pats, classes=classes,
+                n_boxes=len(boxes), n_states=n_states, n_patterns=len(pats),
+                unreachable=unreachable, types=list(types))
+
+
+def reconstruct_mixed(dp, k, li):
+    """按 (架次数 k, 标签下标 li) 回溯出逐架次的模式选择：[(模式下标, 各类取件数), ...]。"""
+    out, state = [], tuple(c[2] for c in dp['classes'])
+    while k > 0:
+        lab = dp['memo'][state][k][li]
+        pi, state, k, li = lab[2], lab[3], lab[4], lab[5]
+        if pi is None:
+            break
+        out.append((pi, dp['pats'][pi]['counts']))
+    return out
+
+
+def box_ids_of_bins(dp, k, li, boxes):
+    """
+    把 (架次数 k, 标签 li) 回溯出的模式序列落到**具体箱号**上（T03）。
+
+    同类货箱（质量与体积逐位相同）在全部约束与代价下完全等价，故类内按
+    `classes[ci][3]` 记录的池顺序取件。要点是**每个箱号在整份方案里至多出现
+    一次**：同质量同体积但编号不同的两个箱子各自出现一次，既不会合并成一个，
+    也不会把同一个箱号发到两个架次上。返回 [(模式下标, 各类取件数, [箱号...]), ...]。
+    """
+    classes = dp['classes']
+    pools = {ci: list(classes[ci][3]) for ci in range(len(classes))}
+    out = []
+    for pi, counts in reconstruct_mixed(dp, k, li):
+        ids = []
+        for ci, take in enumerate(counts):
+            for _ in range(take):
+                ids.append(boxes[pools[ci].pop(0)]['id'])
+        out.append((pi, counts, ids))
+    return out
+
+
+def option_mix(dp, k, li):
+    """该选项用到的机型 → 架次数，例如 {'A': 3, 'C': 1}。"""
+    mix = {}
+    for pi, _cnt in reconstruct_mixed(dp, k, li):
+        g = dp['pats'][pi]['type']
+        mix[g] = mix.get(g, 0) + 1
+    return dict(sorted(mix.items()))
+
+
+def mix_label(mix):
+    return '+'.join('%s%d' % (g, n) for g, n in sorted(mix.items()))
+
+
+# ---------------------------------------------------------------------------
 # 4. 独立复核 1：对称破缺指派式整数规划求最小架次数
 # ---------------------------------------------------------------------------
 def min_k_assignment_ilp(boxes, qmax, vmax, kmax):
@@ -443,39 +611,164 @@ def energy_partition_ilp(d, si_id, tid, k, cap=20000):
     return float(res.fun)
 
 
+def solve_mixed_partition_ilp(d, si_id, cap=120000, time_limit=ILP_TIME_LIMIT):
+    """
+    独立复核 2：以「**真实箱号子集 + 机型**」为列的集合划分整数规划，允许混用机型。
+
+    与 dp_area_mixed() 走两条互不相同的路径：DP 在多重集状态上做标签递推（正向
+    构造），本函数在子集列上做集合划分（列枚举 + 分支定界）。两者在最小架次数与
+    该架次数下的最小能耗上一致，才说明问题一的求解实现无误。
+
+    两阶段字典序：
+      (1) min Σ_p x_p            —— 最少架次数 k*
+      (2) min Σ_p E_p x_p  s.t.  Σ_p x_p = k*   —— 固定架次数下的最小能耗
+    两阶段都必须满足「每个货箱恰被一个架次取走」。
+
+    规模超限、超时或无解**一律如实记录状态**，不得计入「复核一致」。
+    返回 dict(status, k, E, n_cols, secs)。
+    """
+    t0 = time.time()
+    boxes = d.boxes_by_service[si_id]
+    n = len(boxes)
+    m = [b['mass'] for b in boxes]
+    v = [b['volume'] for b in boxes]
+    size = 1 << n
+    tot_m = [0.0] * size
+    tot_v = [0.0] * size
+    cols, E_of = [], []
+    status = 'ok'
+    for mask in range(1, size):
+        low = mask & (-mask)
+        i = low.bit_length() - 1
+        prev = mask ^ low
+        tot_m[mask] = tot_m[prev] + m[i]
+        tot_v[mask] = tot_v[prev] + v[i]
+        for tid in TYPES:
+            tt = d.transport_types[tid]
+            usable = (1.0 - tt['rho']) * tt['E_use']
+            if tot_m[mask] > tt['Q'] + EPS or tot_v[mask] > tt['volume'] + EPS:
+                continue
+            E = roundtrip_energy(tt, d.dem, d.O01, d.si[si_id], tot_m[mask])[0]
+            if E > usable + 1e-9:
+                continue
+            if len(cols) >= cap:
+                return dict(status='列数超限(>%d)' % cap, k=None, E=None,
+                            n_cols=len(cols), secs=time.time() - t0)
+            cols.append((mask, tid))
+            E_of.append(E)
+    ncol = len(cols)
+    if ncol == 0:
+        return dict(status='无可行列', k=None, E=None, n_cols=0, secs=time.time() - t0)
+    for b in range(n):
+        if not any((mk >> b) & 1 for mk, _ in cols):
+            return dict(status='存在无任何可行列的货箱，问题不可行', k=None, E=None,
+                        n_cols=ncol, secs=time.time() - t0)
+
+    rows, ccols, vals = [], [], []
+    for b in range(n):
+        for ci, (mk, _tid) in enumerate(cols):
+            if (mk >> b) & 1:
+                rows.append(b); ccols.append(ci); vals.append(1.0)
+    A1 = csr_matrix((vals, (rows, ccols)), shape=(n, ncol))
+    r1 = milp(c=np.ones(ncol), constraints=LinearConstraint(A1, np.ones(n), np.ones(n)),
+              integrality=np.ones(ncol), bounds=Bounds(0, 1),
+              options=dict(time_limit=time_limit))
+    if not r1.success:
+        return dict(status='阶段1未求得最优(%s)' % r1.message, k=None, E=None,
+                    n_cols=ncol, secs=time.time() - t0)
+    k_star = int(round(float(r1.fun)))
+
+    A2 = csr_matrix((vals + [1.0] * ncol,
+                     (rows + [n] * ncol, ccols + list(range(ncol)))),
+                    shape=(n + 1, ncol))
+    lb2 = np.array([1.0] * n + [float(k_star)])
+    ub2 = np.array([1.0] * n + [float(k_star)])
+    r2 = milp(c=np.array(E_of), constraints=LinearConstraint(A2, lb2, ub2),
+              integrality=np.ones(ncol), bounds=Bounds(0, 1),
+              options=dict(time_limit=time_limit))
+    if not r2.success:
+        return dict(status='阶段2未求得最优(%s)' % r2.message, k=k_star, E=None,
+                    n_cols=ncol, secs=time.time() - t0)
+    return dict(status='ok', k=k_star, E=float(r2.fun), n_cols=ncol,
+                secs=time.time() - t0)
+
+
 # ---------------------------------------------------------------------------
 # 6. 服务区选项与全局帕累托前沿
 # ---------------------------------------------------------------------------
-def area_options(d, si_id):
-    """该服务区在三种机型（可混用）上的非支配选项：{k: [选项, ...]}。
-
-    每个选项 = dict(k, E, T, type)。由于时间只依赖 k（事实 3），同 k 下只需比较能耗。
+def area_options(d, si_id, types=TYPES):
     """
+    该服务区在（可混用机型）下的非支配选项：{k: [选项, ...]}，附带该区的 DP 供回溯。
+
+    每个选项 = dict(k, E, T, label, mix, type)，其中 mix 是该选项实际用到的机型架次
+    组合（如 {'A': 3, 'C': 1}），label 是在 DP 标签集中的下标。
+    **只保留非支配 (E, T) 标签**：同 k 下能耗最小的时间不一定最短，不能只留能耗那一个。
+
+    返回 (opts, dp)；该区在任何机型下都不可作业时返回 ({}, None)。
+    """
+    dp = dp_area_mixed(d, si_id, types=types)
+    if dp is None:
+        return {}, None
     opts = {}
-    for tid in TYPES:
-        dp = dp_area(d, si_id, tid)
-        if dp is None:
+    for k, labels in dp['front'].items():
+        opts[k] = []
+        for li in range(len(labels)):
+            E, T = labels[li]
+            mix = option_mix(dp, k, li)
+            opts[k].append(dict(k=k, E=E, T=T, label=li, mix=mix,
+                                type=mix_label(mix)))
+    return opts, dp
+
+
+def scan_by_k(all_opts):
+    """每个架次数档位下的非支配 (能耗, 作业时间) 集合：{K: [(E, T, pick), ...]}。
+
+    前沿只保留全局非支配点，「架次更多的方案为什么不在前沿上」却要看那些**被
+    支配的点本身**——只看前沿会得到一个「照定义成立」的空话。这里逐 K 合并，
+    每档同样按 (E, T) 剪枝，于是每档的最小能耗与最小作业时间都能读出来。
+    """
+    states = {0: [(0.0, 0.0, [])]}
+    for si_id in sorted(all_opts):
+        opts = all_opts[si_id]
+        if not opts:
             continue
-        A, B = time_affine_coeffs(d, d.transport_types[tid], d.si[si_id], dp['n_boxes'])
-        for k, E in dp['front'].items():
-            opts.setdefault(k, []).append(dict(k=k, E=E, T=A * k + B, type=tid))
-    return opts
+        merged = {}
+        for K, lst in states.items():
+            for k in sorted(opts):
+                for o in opts[k]:
+                    bucket = merged.setdefault(K + k, [])
+                    for (E, T, pick) in lst:
+                        bucket.append((E + o['E'], T + o['T'],
+                                       pick + [(si_id, k, o['label'])]))
+        states = {}
+        for K, lst in merged.items():
+            lst.sort(key=lambda s: (round(s[0], 6), round(s[1], 3)))
+            kept = []
+            for s in lst:
+                if any(o[0] <= s[0] + 1e-9 and o[1] <= s[1] + 1e-6 for o in kept):
+                    continue
+                kept.append(s)
+            states[K] = kept
+    return states
 
 
 def aggregate_front(all_opts):
-    """由各区选项合成全局 (架次数, 总能耗, 总时间) 帕累托前沿。
+    """由各区选项合成全局 (架次数, 总能耗, 总作业时间) 帕累托前沿。
 
-    各区解耦，逐区做 DP 式合并并按三目标支配关系剪枝，得到全局前沿。
+    各区解耦，逐区做 DP 式合并并按三目标支配关系剪枝。pick 里存
+    (服务区, 架次数, 标签下标)，足以回溯出**逐架次的机型与装载**。
     """
     states = [(0, 0.0, 0.0, [])]
     for si_id in sorted(all_opts):
         opts = all_opts[si_id]
+        if not opts:
+            continue
         new = []
         for (K, E, T, pick) in states:
             for k in sorted(opts):
                 for o in opts[k]:
                     new.append((K + k, E + o['E'], T + o['T'],
-                                pick + [(si_id, k, o['type'])]))
+                                pick + [(si_id, k, o['label'])]))
         new.sort(key=lambda s: (s[0], round(s[1], 6), round(s[2], 3)))
         kept = []
         for s in new:
@@ -606,44 +899,73 @@ def main():
     # ---------- 3) 逐区字典序最优方案 ----------
     print('=' * 78)
     print('3) 推荐组批方案：逐区字典序最优（架次 -> 能耗 -> 时间），机型可混用')
-    all_opts = {si_id: area_options(d, si_id) for si_id in d.S}
+    all_opts, all_dp = {}, {}
+    for si_id in d.S:
+        o, dp = area_options(d, si_id)
+        all_opts[si_id], all_dp[si_id] = o, dp
     rec, rows = {}, []
     tot_k, tot_e, tot_t = 0, 0.0, 0.0
     for si_id in d.S:
-        opts = all_opts[si_id]
+        opts, dp = all_opts[si_id], all_dp[si_id]
         if not opts:
             continue
         k_best = min(opts)
-        o = min(opts[k_best], key=lambda x: x['E'])       # 同架次下取能耗最小
+        o = min(opts[k_best], key=lambda x: (x['E'], x['T']))   # 字典序：架次→能耗→时间
         rec[si_id] = o['type']
         tot_k += o['k']; tot_e += o['E']; tot_t += o['T']
-        dp = dp_area(d, si_id, o['type'], with_table=True)
-        classes = dp['classes']
-        bins = reconstruct(dp, k_best)
         boxes = d.boxes_by_service[si_id]
-        pools = {ci: list(classes[ci][3]) for ci in range(len(classes))}
-        tt = d.transport_types[o['type']]
-        for bi, (pi, counts) in enumerate(bins):
-            ids = []
-            for ci, take in enumerate(counts):
-                for _ in range(take):
-                    ids.append(boxes[pools[ci].pop(0)]['id'])
-            n_bin = sum(counts)
-            t_one = (trip_duration(d, tt, d.si[si_id], n_bin, *roundtrip_energy(
-                tt, d.dem, d.O01, d.si[si_id], dp['pats'][pi][1])[1:]))
-            E_one = dp['E_pat'][pi]
+        for bi, (pi, counts, ids) in enumerate(
+                box_ids_of_bins(dp, k_best, o['label'], boxes)):
+            p = dp['pats'][pi]
             rows.append(dict(
-                架次编号=f'{si_id}-{o["type"]}-{bi + 1}', 服务区编号=si_id,
-                机型编号=o['type'], 货箱编号列表=';'.join(ids),
-                总质量kg=round(dp['pats'][pi][1], 2),
-                总体积m3=round(dp['pats'][pi][2], 4),
-                往返时间s=round(t_one, T_DEC), 架次能耗kWh=round(E_one, E_DEC),
-                返航SOC=round(1.0 - E_one / tt['E_use'], 6)))
-    print('  服务区->机型:', rec)
+                架次编号=f'{si_id}-{p["type"]}-{bi + 1}', 服务区编号=si_id,
+                机型编号=p['type'], 货箱编号列表=';'.join(ids),
+                总质量kg=round(p['mass'], 2), 总体积m3=round(p['vol'], 4),
+                往返时间s=round(p['T'], T_DEC), 架次能耗kWh=round(p['E'], E_DEC),
+                返航SOC=round(1.0 - p['E'] / d.transport_types[p['type']]['E_use'], 6)))
+    print('  服务区->机型组合:', '  '.join('%s:%s' % (s, rec[s]) for s in sorted(rec)))
+    # 组合串形如 'B1+C1'（1 架 B 型 + 1 架 C 型）；出现加号才是真混用，不能按串长判
+    n_mixed = sum(1 for s in rec if '+' in rec[s])
+    print('  其中真正混用机型（同一服务区出现 2 种及以上机型）的服务区 %d 个：%s'
+          % (n_mixed, '、'.join(s for s in sorted(rec) if '+' in rec[s]) or '无'))
     print('  推荐方案总计: 架次=%d, 能耗=%.2f kWh, 时间=%.2f h'
           % (tot_k, tot_e, tot_t / 3600))
     pd.DataFrame(rows).to_csv(os.path.join(OUT, 'q1_recommended_batching.csv'), index=False)
     print('  已导出 q1_recommended_batching.csv，共 %d 架次' % len(rows))
+
+    # 独立复核 2：真实箱号子集 + 机型的集合划分 ILP（含混用），两阶段字典序。
+    # 与 DP 是两条不同路径；状态非 ok 的组合**不计入**一致数，如实列出。
+    print('-' * 78)
+    print('  混用机型集合划分 ILP 复核（列 = 真实箱号子集 × 机型，两阶段字典序）：')
+    mix_rows = []
+    nok = nchk = 0
+    for si_id in d.S:
+        opts, dp = all_opts[si_id], all_dp[si_id]
+        if not opts:
+            mix_rows.append(dict(服务区=si_id, 状态='该区无可行方案', DP架次=None))
+            continue
+        k_ex = min(opts)
+        e_ex = min(o['E'] for o in opts[k_ex])
+        r = solve_mixed_partition_ilp(d, si_id)
+        ok = (r['status'] == 'ok' and r['k'] == k_ex
+              and r['E'] is not None and abs(r['E'] - e_ex) < 1e-6)
+        if r['status'] == 'ok':
+            nchk += 1
+            nok += 1 if ok else 0
+        mix_rows.append(dict(服务区=si_id, 状态=r['status'], 列数=r['n_cols'],
+                             DP架次=k_ex, ILP架次=r['k'],
+                             DP能耗kWh=round(e_ex, 6),
+                             ILP能耗kWh=(None if r['E'] is None else round(r['E'], 6)),
+                             一致=('是' if ok else ('否' if r['status'] == 'ok' else '—')),
+                             耗时s=round(r['secs'], 2)))
+        if r['status'] == 'ok' and not ok:
+            print('    !! %s DP=%d/%.6f  ILP=%s/%s'
+                  % (si_id, k_ex, e_ex, r['k'], r['E']))
+        elif r['status'] != 'ok':
+            print('    -- %s 未复核（%s）' % (si_id, r['status']))
+    pd.DataFrame(mix_rows).to_csv(os.path.join(OUT, 'q1_ilp_mixed.csv'), index=False)
+    print('    DP 与集合划分 ILP 一致 %d / %d（其余按上表状态如实记录，不计入一致数）'
+          % (nok, nchk))
 
     # ---------- 4) 帕累托前沿 ----------
     print('=' * 78)
@@ -653,18 +975,39 @@ def main():
     for (K, E, T, pick) in states:
         par_rows.append(dict(架次数=int(K), 总能耗kWh=round(E, 3),
                              总作业时间s=round(T, T_DEC), 总作业时间h=round(T / 3600, 3),
-                             方案=';'.join('%s:%d%s' % (s, k, g) for s, k, g in pick)))
+                             方案=';'.join('%s:%d%s' % (s, k, all_opts[s][k][li]['type'])
+                                          for s, k, li in pick)))
     df_par = pd.DataFrame(par_rows).sort_values(['架次数', '总能耗kWh'])
     df_par.to_csv(os.path.join(OUT, 'q1_pareto.csv'), index=False)
     for si_id in d.S:
         for k in sorted(all_opts[si_id]):
             for o in all_opts[si_id][k]:
-                area_rows.append(dict(服务区=si_id, 机型=o['type'], 架次数=k,
+                area_rows.append(dict(服务区=si_id, 机型组合=o['type'], 架次数=k,
                                       能耗kWh=round(o['E'], 3), 时间s=round(o['T'], 1)))
     pd.DataFrame(area_rows).to_csv(os.path.join(OUT, 'q1_pareto_area.csv'), index=False)
     print('  全局前沿点数 %d；架次数范围 %d--%d'
           % (len(df_par), int(df_par['架次数'].min()), int(df_par['架次数'].max())))
     print(df_par.head(10).to_string(index=False))
+
+    # 逐 K 扫描：前沿只留非支配点，被支配的那些点单独落盘，供论文说明
+    # 「为何架次更多的方案不在前沿上」，也供图 5.3(a) 画出完整的扫描轨迹。
+    front_K = set(int(x) for x in df_par['架次数'])
+    scan = scan_by_k(all_opts)
+    scan_rows = []
+    for K in sorted(scan):
+        lst = scan[K]
+        e_best = min(lst, key=lambda s: (round(s[0], 6), round(s[1], 3)))
+        t_best = min(lst, key=lambda s: (round(s[1], 3), round(s[0], 6)))
+        scan_rows.append(dict(
+            架次数=K, 最小能耗kWh=round(e_best[0], 3),
+            对应作业时间h=round(e_best[1] / 3600, 3),
+            最小作业时间h=round(t_best[1] / 3600, 3),
+            对应能耗kWh=round(t_best[0], 3),
+            非支配=('是' if K in front_K else '否'),
+            档内非支配点数=len(lst)))
+    pd.DataFrame(scan_rows).to_csv(os.path.join(OUT, 'q1_scan.csv'), index=False)
+    print('  逐 K 扫描 %d 档，其中非支配档 %d 个（已导出 q1_scan.csv）'
+          % (len(scan_rows), len(front_K)))
 
     # ---------- 5) 返航安全余量敏感性 ----------
     print('=' * 78)
@@ -706,17 +1049,12 @@ def main():
         tot = 0
         bad = []
         for si_id in d.S:
-            k_best = None
-            for tid in TYPES:
-                dp = dp_area(d, si_id, tid)
-                if dp is None:
-                    continue
-                kk = min(dp['front'])
-                k_best = kk if k_best is None else min(k_best, kk)
-            if k_best is None:
+            # 混用机型后的最优架次数：可选域比单机型更大，故 k 不会更差
+            dp = dp_area_mixed(d, si_id)
+            if dp is None:
                 bad.append(si_id)
             else:
-                tot += k_best
+                tot += min(dp['front'])
         for tid in TYPES:
             d.transport_types[tid]['rho'] = base[tid]
         res = None if bad else tot

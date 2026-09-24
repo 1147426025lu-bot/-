@@ -1,0 +1,287 @@
+{
+ "QoneTrips": {
+  "value": "18",
+  "meaning": "问题一 总架次",
+  "source": "q1_recommended_batching.csv 行数"
+ },
+ "QoneEnergy": {
+  "value": "59.236",
+  "meaning": "问题一 总能耗 kWh",
+  "source": "q1_recommended_batching.csv 架次能耗kWh 求和"
+ },
+ "QoneMass": {
+  "value": "758.000",
+  "meaning": "问题一 总运载质量 kg",
+  "source": "q1_recommended_batching.csv 总质量kg 求和"
+ },
+ "QoneMinSoc": {
+  "value": "22.83\\%",
+  "meaning": "问题一 最小返航 SOC",
+  "source": "q1_recommended_batching.csv 返航SOC 最小值 ×100"
+ },
+ "QoneMaxRound": {
+  "value": "2370.6",
+  "meaning": "问题一 单架次最长往返时间 s",
+  "source": "q1_recommended_batching.csv 往返时间s 最大值"
+ },
+ "QoneWorkTimeH": {
+  "value": "9.10",
+  "meaning": "问题一 总作业时间 h",
+  "source": "q1_pareto.csv 总作业时间h（推荐方案行）"
+ },
+ "QoneWorkTimeS": {
+  "value": "32771.8",
+  "meaning": "问题一 总作业时间 s",
+  "source": "q1_pareto.csv 总作业时间s（推荐方案行）"
+ },
+ "QoneAreas": {
+  "value": "15",
+  "meaning": "服务区总数",
+  "source": "q1_max_payload.csv 行数"
+ },
+ "QoneIlpAgree": {
+  "value": "14",
+  "meaning": "问题一 与 ILP 复核一致的区数",
+  "source": "q1_ilp_mixed.csv 一致列为真的行数"
+ },
+ "QoneIlpCases": {
+  "value": "15",
+  "meaning": "问题一 参与复核的区数",
+  "source": "q1_ilp_mixed.csv 行数"
+ },
+ "QoneIlpGapCases": {
+  "value": "45",
+  "meaning": "问题一 逐机型逐区算例数",
+  "source": "q1_ilp_gap.csv 行数"
+ },
+ "QtwoTrips": {
+  "value": "20",
+  "meaning": "问题二 运输架次数",
+  "source": "q2_transport_trips.csv 行数"
+ },
+ "QtwoUavs": {
+  "value": "8",
+  "meaning": "运输无人机架数",
+  "source": "q2_solution.json uav_ids"
+ },
+ "QtwoEnergy": {
+  "value": "68.713",
+  "meaning": "问题二 总能耗 kWh",
+  "source": "q2_transport_trips.csv 架次能耗kWh 求和"
+ },
+ "QtwoMakespan": {
+  "value": "8732.6",
+  "meaning": "问题二 完工时刻 s",
+  "source": "q2_transport_trips.csv 返回O01时刻s 最大值"
+ },
+ "QtwoTardiness": {
+  "value": "0.0",
+  "meaning": "问题二 加权时延",
+  "source": "q2_solution.json metrics.tardiness"
+ },
+ "QtwoHardViol": {
+  "value": "0",
+  "meaning": "问题二 硬约束违反数",
+  "source": "q2_solution.json metrics.hard_viol"
+ },
+ "QtwoBoxes": {
+  "value": "80",
+  "meaning": "交付箱次",
+  "source": "q2_box_delivery.csv 行数"
+ },
+ "QtwoSeed": {
+  "value": "20260923",
+  "meaning": "ALNS 随机种子",
+  "source": "q2_solution.json seed"
+ },
+ "QtwoScanRows": {
+  "value": "6",
+  "meaning": "ε-约束扫描档数",
+  "source": "q2_scan.csv 行数"
+ },
+ "QtwoParetoRows": {
+  "value": "6",
+  "meaning": "非支配前沿档数",
+  "source": "q2_pareto.csv 行数"
+ },
+ "QtwoRecK": {
+  "value": "20",
+  "meaning": "推荐档 K 上限",
+  "source": "q2_pareto.csv K上限（推荐档）"
+ },
+ "QtwoRecTrips": {
+  "value": "20",
+  "meaning": "推荐档实际架次",
+  "source": "q2_pareto.csv 实际架次（推荐档）"
+ },
+ "QtwoRecEnergy": {
+  "value": "68.713",
+  "meaning": "推荐档能耗 kWh",
+  "source": "q2_pareto.csv 能耗kWh（推荐档）"
+ },
+ "QtwoRecMakespan": {
+  "value": "8732.6",
+  "meaning": "推荐档完工时刻 s",
+  "source": "q2_pareto.csv makespan_s（推荐档）"
+ },
+ "QtwoExactCases": {
+  "value": "6",
+  "meaning": "精确验证算例数",
+  "source": "q2_exact.csv 行数"
+ },
+ "QtwoExactTimeout": {
+  "value": "1",
+  "meaning": "超时算例数",
+  "source": "q2_exact.csv 超时列求和（空值按 0）"
+ },
+ "QtwoExactProved": {
+  "value": "5",
+  "meaning": "已证最优算例数",
+  "source": "q2_exact.csv 已证最优列求和（空值按 0）"
+ },
+ "QthreeRelays": {
+  "value": "6",
+  "meaning": "问题三 中继架次数",
+  "source": "q3_relay_trips.csv 行数"
+ },
+ "QthreeStations": {
+  "value": "3",
+  "meaning": "悬停站数",
+  "source": "q3_stations.csv 行数"
+ },
+ "QthreeSegs": {
+  "value": "71",
+  "meaning": "通信分段数",
+  "source": "q3_comm_phases.csv 行数"
+ },
+ "QthreeIntervals": {
+  "value": "21",
+  "meaning": "通信失效区间数",
+  "source": "q3_intervals.csv 行数"
+ },
+ "QthreeDirect": {
+  "value": "66.18\\%",
+  "meaning": "直连时间占比",
+  "source": "q3_metrics.csv 直连时间占比 ×100"
+ },
+ "QthreeRelayFrac": {
+  "value": "33.82\\%",
+  "meaning": "中继时间占比",
+  "source": "q3_metrics.csv 中继时间占比 ×100"
+ },
+ "QthreeGap": {
+  "value": "0.00\\%",
+  "meaning": "中断时间占比",
+  "source": "q3_metrics.csv 中断时间占比 ×100"
+ },
+ "QthreeTransEnergy": {
+  "value": "68.713",
+  "meaning": "问题三 运输能耗 kWh",
+  "source": "q3_metrics.csv 运输能耗"
+ },
+ "QthreeRelayEnergy": {
+  "value": "4.963",
+  "meaning": "问题三 中继能耗 kWh",
+  "source": "q3_metrics.csv 中继能耗"
+ },
+ "QthreeJointEnergy": {
+  "value": "73.676",
+  "meaning": "问题三 合计能耗 kWh",
+  "source": "q3_metrics.csv 合计能耗"
+ },
+ "QthreeTransDone": {
+  "value": "10853.3",
+  "meaning": "运输完工时刻 s",
+  "source": "q3_metrics.csv 运输完工时刻"
+ },
+ "QthreeJointDone": {
+  "value": "10853.3",
+  "meaning": "联合完工时刻 s",
+  "source": "q3_metrics.csv 联合完工时刻"
+ },
+ "QthreeTardiness": {
+  "value": "223301.0",
+  "meaning": "问题三 加权迟到",
+  "source": "q3_metrics.csv 加权迟到"
+ },
+ "QthreeLateBoxes": {
+  "value": "6",
+  "meaning": "迟到箱数",
+  "source": "q3_metrics.csv 迟到箱数"
+ },
+ "QthreeMaxLate": {
+  "value": "5472.5",
+  "meaning": "最长迟到 s",
+  "source": "q3_metrics.csv 最长迟到"
+ },
+ "QthreeMinMargin": {
+  "value": "69.3",
+  "meaning": "最小硬时限余量 s",
+  "source": "q3_metrics.csv 最小硬时限余量"
+ },
+ "QthreeStaggered": {
+  "value": "5",
+  "meaning": "错峰推迟架次数",
+  "source": "q3_metrics.csv 错峰推迟架次数"
+ },
+ "QthreeDelaySum": {
+  "value": "11862.3",
+  "meaning": "累计推迟量 s",
+  "source": "q3_metrics.csv 累计推迟量"
+ },
+ "QthreeCoverageStep": {
+  "value": "1.0",
+  "meaning": "覆盖核算采样步长 s",
+  "source": "q3_coverage.csv 采样步长s 最大值"
+ },
+ "QfourK": {
+  "value": "2",
+  "meaning": "问题四 分区数 K",
+  "source": "q4_comparison.csv K"
+ },
+ "QfourR": {
+  "value": "30",
+  "meaning": "问题四 资源规模 R",
+  "source": "q4_comparison.csv 资源规模R"
+ },
+ "QfourCV": {
+  "value": "0.7462",
+  "meaning": "问题四 工作量均衡 CV",
+  "source": "q4_comparison.csv 工作量均衡CV_W"
+ },
+ "QfourRelayNeed": {
+  "value": "3",
+  "meaning": "中继无人机总需求",
+  "source": "q4_comparison.csv 中继总需求最小"
+ },
+ "QfourGapSum": {
+  "value": "2",
+  "meaning": "单份库存下的总量缺口",
+  "source": "q4_comparison.csv 总量缺口"
+ },
+ "QfourRedundancy": {
+  "value": "2",
+  "meaning": "总量冗余",
+  "source": "q4_comparison.csv 总量冗余"
+ },
+ "QfourFeasible": {
+  "value": "0",
+  "meaning": "库存可行分区数",
+  "source": "q4_comparison.csv 库存可行分区数"
+ },
+ "QfourPartitions": {
+  "value": "5",
+  "meaning": "入选分区数",
+  "source": "q4_partition.csv 行数"
+ },
+ "QfourAllPartitions": {
+  "value": "364",
+  "meaning": "枚举分区总数",
+  "source": "q4_all_partitions.csv 行数"
+ },
+ "QfourUnits": {
+  "value": "7",
+  "meaning": "任务单元数",
+  "source": "q4_units.csv 行数"
+ }
+}

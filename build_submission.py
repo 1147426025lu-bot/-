@@ -22,7 +22,12 @@ r"""打包提交材料。
     它会直接跳过编译并返回 0，让人误以为通过。要验证必须删掉 main.log/main.xdv
     后单独跑 xelatex。
 
-用法：python build_submission.py
+清单预检（F16）：旧版对缺失项只打印一行「跳过」就继续，于是少一个结果表、少一张
+图，照样产出一个「看起来完整」的提交包——缺的恰恰是最该被发现的东西。现在打包前
+先逐项核对：任一必需文件缺失、或正文 \\includegraphics 引用的图不存在，就列出**全部**
+缺失项并以非零码中止，且**不创建输出目录**、不动上一版包。`--check` 只预检不打包。
+
+用法：python build_submission.py [--check]
 """
 import io
 import os
@@ -109,7 +114,54 @@ def copy_tree(src, dst, fig_ok=None):
     return n
 
 
+def missing_referenced_figures():
+    """正文引用但文件不存在的图。引用带路径时按相对 ROOT 的路径找，找不到再按
+    figures/ 目录下的主干名找（LaTeX 允许省略扩展名）。"""
+    miss = []
+    for name in sorted(referenced_figures()):
+        stem = os.path.splitext(name)[0]
+        cands = [os.path.join(ROOT, name), os.path.join(ROOT, 'figures', name),
+                 os.path.join(ROOT, 'figures', stem + '.pdf'),
+                 os.path.join(ROOT, 'figures', stem + '.png')]
+        if not any(os.path.exists(c) for c in cands):
+            miss.append(name)
+    return miss
+
+
+def preflight():
+    """打包前的清单核对：返回缺失项列表（空表示可以打包）。"""
+    bad = []
+    for item in PAPER_PDF:
+        if not os.path.exists(os.path.join(ROOT, item)):
+            bad.append('论文正文 %s（缺它就没有可提交的 PDF）' % item)
+    for item in SUPPORT + DATA:
+        if not os.path.exists(os.path.join(ROOT, item.replace('/', os.sep))):
+            bad.append('支撑材料 %s' % item)
+    bad += ['正文引用的图 figures/%s' % f for f in missing_referenced_figures()]
+    return bad
+
+
 def main():
+    if '--check' in sys.argv[1:]:
+        bad = preflight()
+        if bad:
+            print('预检不通过，共 %d 项缺失：' % len(bad))
+            for b in bad:
+                print('  !! %s' % b)
+            return 1
+        print('预检通过：清单 %d 项齐全，正文引用的图全部存在'
+              % (len(PAPER_PDF) + len(SUPPORT) + len(DATA)))
+        return 0
+
+    bad = preflight()
+    if bad:
+        # 中止时**不创建输出目录**：上一版 提交包/ 原样保留，人不会拿到一个
+        # 少了结果表或图、却看起来完整的包。
+        print('清单预检未通过，已中止打包（未改动 %s）：' % os.path.basename(OUT))
+        for b in bad:
+            print('  !! 缺失：%s' % b)
+        return 1
+
     if os.path.exists(OUT):
         shutil.rmtree(OUT)
     paper_dir = os.path.join(OUT, '论文')
@@ -193,7 +245,8 @@ def main():
             print('     %s' % p)
     else:
         print('  无 .doc/.docx/.wps 残留')
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

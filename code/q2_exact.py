@@ -131,10 +131,15 @@ def solve_layerA(d, services, time_limit=300.0, verbose=False):
               options=dict(time_limit=time_limit, mip_rel_gap=0.0, presolve=True))
     if not r2.success:
         raise RuntimeError(f'Layer A 第二层未求解成功: {r2.message}')
+    t_milp = time.time() - t0 - t_gen          # 两个 MILP 的求解时间
+    t_tot = time.time() - t0                   # 列生成 + 两个 MILP，完整耗时
     if verbose:
-        print(f'   列数={m} 生成耗时={t_gen:.1f}s  K*={K}  E*={r2.fun:.6f} kWh')
-    return dict(n_trips=K, energy=float(r2.fun), n_cols=m, t_gen=t_gen,
-                gap=r2.mip_gap if hasattr(r2, 'mip_gap') else None,
+        print(f'   列数={m} 列生成={t_gen:.1f}s 两阶段MILP={t_milp:.1f}s '
+              f'合计={t_tot:.1f}s  K*={K}  E*={r2.fun:.6f} kWh')
+    return dict(n_trips=K, energy=float(r2.fun), n_cols=m,
+                t_gen=t_gen, t_milp=t_milp, t_exact=t_tot,
+                gap=(max(r1.mip_gap or 0.0, r2.mip_gap or 0.0)
+                     if hasattr(r2, 'mip_gap') else None),
                 x=np.asarray(r2.x).ravel(), cols=cols)
 
 
@@ -152,17 +157,36 @@ def layerA_case(d, services, n_iter=3000, seed=11, time_limit=300.0):
                 alns_K=m['n_trips'], alns_E=m['total_E'],
                 gap_K=m['n_trips'] - ex['n_trips'],
                 gap_E=(m['total_E'] - ex['energy']) / ex['energy'] * 100.0,
-                t_exact=ex['t_gen'], t_alns=t_alns)
+                # 与 ALNS 比时间必须用**完整**耗时（列生成 + 两个 MILP），
+                # 只报列生成时间会把这个"精确解"说快一个数量级
+                t_exact=ex['t_exact'], t_gen=ex['t_gen'], t_milp=ex['t_milp'],
+                t_alns=t_alns,
+                # 两个 MILP 各自的 mip_gap（无此属性时为 None）：间隙为 0 才算
+                # 证到最优。不写「超时」字段——本层没有捕获求解器状态，缺就不要编。
+                gap=ex['gap'])
 
 
 # ===========================================================================
 # Layer B：时序层（big-M 析取 MILP）
 # ===========================================================================
-def _ub_sequential(asg):
-    """顺序执行全部架次的 makespan 上界（同时也是 big-M 的基准 UB）。"""
+def _ub_sequential(d, asg):
+    """
+    big-M 的基准上界 UB：**计入共享电池充电占用**的安全串行排程完工时刻。
+
+    构造一份必然可行的排程——完全串行，任一时刻只有一架次在飞：第 p 架次的开始
+    时刻取前面所有架次的 (duration + 充电时长) 之和。无重叠即无资源冲突（无人机
+    与电池即便同名也不会被同时占用），故它是**可行**排程；而任何可行排程的完工
+    时刻都不可能超过一个可行排程，故它同时是我们需要的上界。
+
+    旧版只累加 duration，漏掉了电池充电占用，取出的 UB 偏小 → M 偏小 →
+    析取约束把「后一架次必须等前一架次连充电都完成」误编码成可以更早开始，
+    进而把真正可行的排程判为不可行（假不可行）。这是本脚本初版真实踩过的坑的
+    同一个根因，故此处显式计入充电，并在 solve_layerB 里回放验证该界不截掉可行解。
+    """
     t = 0.0
     for a in sorted(asg, key=lambda x: x['start']):
-        t += a['duration']
+        soc_end = 1.0 - a['plan']['E'] / d.transport_types[a['type']]['E_use']
+        t += a['duration'] + charge_time(soc_end, d.batteries[a['type']][1])
     return t
 
 
@@ -196,9 +220,12 @@ def solve_layerB(d, asg, free_units=False, time_limit=90.0, criterion='makespan'
     # 电池在本架次结束后还要充电，充电期同样不可被别的架次占用
     chg = np.array([charge_time(1.0 - a['plan']['E'] / d.transport_types[a['type']]['E_use'],
                                 d.batteries[a['type']][1]) for a in asg], dtype=float)
-    ub = _ub_sequential(asg)
+    ub = _ub_sequential(d, asg)
     M = ub + float(np.max(dur + chg))     # 见文件头：M 必须 ≥ UB + max τ
     Hmax = ub + float(np.max(dur + chg))
+    # 上界不截掉可行解的**实证**：贪心排程（B1 口径下的一手可行解）的完工时刻与
+    # 最大开始时刻都必须落在 Hmax 之内；若贴边，说明界太紧，M 也就不可信。
+    greedy_done = float(np.max([a['start'] + a['duration'] for a in asg]))
 
     nv = n + 1
     rows_eq, rhs_eq, rows_le, rhs_le = [], [], [], []
@@ -382,10 +409,22 @@ def solve_layerB(d, asg, free_units=False, time_limit=90.0, criterion='makespan'
                          key=lambda uid: x[y_uav[(p, uid)]])
             b_best = max(range(d.batteries[g][0]), key=lambda b: x[y_bat[(p, b)]])
             units.append((u_best, f'{g}B{b_best}'))
-    return dict(makespan=float(r.fun), starts=starts, units=units,
+    # 目标值与完工时刻是两回事：criterion='tardiness' 时 r.fun 是加权时延，把它
+    # 塞进名为 makespan 的键里会让调用方把两个量混为一谈（旧版就是这样）。故分开：
+    #   objective_value —— MILP 目标函数值
+    #   makespan        —— 由 start+duration 独立算出的真实完工时刻
+    #   proved_optimal  —— 是否已证最优（超时但有可行解 ≠ 已证最优）
+    obj = float(r.fun)
+    makespan = float(np.max(starts + dur))
+    timed_out = (getattr(r, 'status', 0) == 1)
+    return dict(objective_value=obj, makespan=makespan,
+                criterion=criterion, starts=starts, units=units,
                 n_bin=int(integ.sum()), status=r.message,
+                proved_optimal=bool(r.success), timed_out=timed_out,
+                incumbent=obj, best_bound=getattr(r, 'mip_dual_bound', None),
                 gap=getattr(r, 'mip_gap', None), secs=secs,
-                M=M, ub=ub, free_units=free_units)
+                M=M, ub=ub, bound_headroom=Hmax - greedy_done,
+                free_units=free_units)
 
 
 def replay_check(d, asg, starts, units):
@@ -446,11 +485,17 @@ def main():
         try:
             r = layerA_case(d, svc, n_iter=3000, seed=11)
             rows.append(dict(层级='A', 算例='+'.join(svc), 箱数=nb, 列数=r['n_cols'],
+                             目标口径='能耗（字典序：架次→能耗）',
                              精确架次=r['exact_K'], 精确能耗=round(r['exact_E'], 6),
                              ALNS架次=r['alns_K'], ALNS能耗=round(r['alns_E'], 6),
-                             架次间隙=r['gap_K'], 能耗间隙pct=round(r['gap_E'], 4)))
-            print(f'    精确 K*={r["exact_K"]} E*={r["exact_E"]:.4f} | '
-                  f'ALNS K={r["alns_K"]} E={r["alns_E"]:.4f} | '
+                             架次间隙=r['gap_K'], 能耗间隙pct=round(r['gap_E'], 4),
+                             上下界间隙=(None if r['gap'] is None else round(r['gap'], 9)),
+                             已证最优=(None if r['gap'] is None else int(r['gap'] <= 1e-9)),
+                             精确耗时s=round(r['t_exact'], 2),
+                             ALNS耗时s=round(r['t_alns'], 2)))
+            print(f'    精确 K*={r["exact_K"]} E*={r["exact_E"]:.4f} '
+                  f'(列生成{r["t_gen"]:.0f}s + MILP{r["t_milp"]:.0f}s = {r["t_exact"]:.0f}s) | '
+                  f'ALNS K={r["alns_K"]} E={r["alns_E"]:.4f} ({r["t_alns"]:.0f}s) | '
                   f'架次间隙={r["gap_K"]} 能耗间隙={r["gap_E"]:+.3f}%')
         except Exception as e:
             print(f'    [跳过] {e}')
@@ -475,18 +520,32 @@ def main():
             mm = eval_starts(d, asg, r['starts'])
             imp = (m_g['makespan'] - mm['makespan']) / m_g['makespan'] * 100.0
             gap = r['gap'] if r['gap'] is not None else 0.0
+            # 列名必须自带口径：层 B 的目标是「最短完工」或「最小加权时延」，同一个
+            # 槽位在不同算例里装的是不同量纲的数。原来只写「精确能耗 / ALNS能耗」，
+            # 读表的人会以为 B1 行的 9.7e5 是能耗，而它其实是加权时延。
             rows.append(dict(层级=label.split()[0], 算例=label, 箱数=80, 列数=r['n_bin'],
-                             精确架次=len(asg), 精确能耗=round(mm['tardiness'], 3),
-                             ALNS架次=-1, ALNS能耗=round(mm['makespan'], 3),
-                             架次间隙=round(imp, 4),
-                             能耗间隙pct=round(100 * gap, 2)))
-            print(f'  {label}: 二元变量={r["n_bin"]} 目标*={r["makespan"]:.1f} '
-                  f'gap={gap:.4%} {r["secs"]:.1f}s')
+                             目标口径=r['criterion'],
+                             精确架次=len(asg),
+                             目标值=round(r['objective_value'], 6),
+                             回放makespan_s=round(mm['makespan'], 3),
+                             回放加权时延=round(mm['tardiness'], 3),
+                             回放硬违反=int(mm['hard_viol']),
+                             相对贪心makespan_pct=round(imp, 4),
+                             上下界间隙=round(gap, 6),
+                             已证最优=int(r['proved_optimal']), 超时=int(r['timed_out']),
+                             大M=round(r['M'], 1), UB=round(r['ub'], 1),
+                             界余量s=round(r['bound_headroom'], 1),
+                             回放校验=int(bool(ok)), 贪心暖可行=int(bool(warm_ok)),
+                             求解s=round(r['secs'], 2)))
+            print(f'  {label}: 二元变量={r["n_bin"]} 目标值={r["objective_value"]:.1f} '
+                  f'（{r["criterion"]} 口径）gap={gap:.4%} {r["secs"]:.1f}s '
+                  f'{"已证最优" if r["proved_optimal"] else ("超时(有可行解，未证最优)" if r["timed_out"] else "未证最优")}')
             print(f'    回放后实际: makespan={mm["makespan"]:.1f}s '
                   f'(贪心 {m_g["makespan"]:.1f}s, {imp:+.2f}%) '
                   f'时延={mm["tardiness"]:.0f}（贪心 {m_g["tardiness"]:.0f}）'
                   f' 硬违反={mm["hard_viol"]}')
-            print(f'    大M={r["M"]:.1f}（UB={r["ub"]:.1f} + max τ）；'
+            print(f'    大M={r["M"]:.1f}（UB={r["ub"]:.1f} 含充电等待 + max τ）；'
+                  f'界余量={r["bound_headroom"]:.0f}s（贪心完工距 Hmax，>0 说明界未截掉可行解）；'
                   f'贪心暖可行性={warm_ok}；MIP 解回放={ok}（{msg}）')
         except Exception as e:
             print(f'  {label}: [跳过] {e}')

@@ -13,6 +13,7 @@
 import sys
 sys.stdout.reconfigure(encoding='utf-8')
 import os
+import json
 import math
 import numpy as np
 import pandas as pd
@@ -89,51 +90,76 @@ def save(fig, name):
 # ---------------------------------------------------------------- 问题一
 
 def fig_q1_pareto():
-    """(a) 全局帕累托前沿 (b) 各区「架次-能耗」曲线族 (c) 临界 ρ 阶梯跳变。"""
+    """(a) 逐 K 扫描与非支配前沿 (b) 各区「架次-能耗」曲线族 (c) 临界 ρ 阶梯跳变。"""
     p = rd('q1_pareto.csv').sort_values('架次数')
+    scan = rd('q1_scan.csv').sort_values('架次数')
     area = rd('q1_pareto_area.csv')
     crit = rd('q1_critical_rho.csv')
 
     fig, axes = plt.subplots(1, 3, figsize=(10.0, 3.6))
 
-    # (a) 全局帕累托前沿：能耗与作业时间反向，双轴各表一支
+    # (a) 逐 K 扫描画在**目标空间**里，而不是「架次数 vs 两个纵轴」。
+    # 双纵轴的画法在这里是失败的：能耗的降幅只有 0.17%，作业时间的涨幅却有
+    # 269%，同一张坐标轴无论怎么定范围都装不下这两个量级——画出来要么两条
+    # 曲线重合、要么前沿那点降耗被压成一条直线。改成 (该档作业时间, 该档能耗)
+    # 的散点后，「被支配」就是字面意义上的「点在右上」：除两个前沿点外，每档
+    # 的能耗与作业时间都同时更大，读者一眼能看出第 20 档起为何不再划算。
     ax = axes[0]
-    ax.plot(p['架次数'], p['总能耗kWh'], '-o', color=C_A, ms=8, lw=2.2, label='总能耗')
-    ax.set_xlabel('架次数')
-    ax.set_ylabel('总能耗 (kWh)', color=C_A)
-    ax.tick_params(axis='y', colors=C_A)
-    ax2 = ax.twinx()
-    ax2.plot(p['架次数'], p['总作业时间h'], '--s', color=C_C, ms=7, lw=2.2, label='总作业时间')
-    ax2.set_ylabel('总作业时间 (h)', color=C_C)
-    ax2.tick_params(axis='y', colors=C_C)
-    ax2.set_ylim(9.0, 11.9)
-    ax2.grid(False)
-    # 推荐方案（架次最少的一支）单独标出，读者一眼能看到选了哪个点。
-    # 六条曲线挤在 62.7~63.2 这段里，不留净空的话标注文字会直接压在曲线上、
-    # 或者被顶到标题上；故按数据范围手工给出上下净空。
-    r = p.iloc[0]
-    ax.set_ylim(62.60, 63.40)
-    ax.annotate('推荐方案\n%d 架次' % r['架次数'], xy=(r['架次数'], r['总能耗kWh']),
-                xytext=(r['架次数'] + 1.4, 63.26), fontsize=12, va='top',
-                arrowprops=dict(arrowstyle='->', color='black', lw=1.2))
-    ax.set_title('帕累托前沿：架次–能耗–时间')
+    t_all = scan['对应作业时间h'].to_numpy(float)
+    e_all = scan['最小能耗kWh'].to_numpy(float)
+    k_all = scan['架次数'].to_numpy(int)
+    ndm = (scan['非支配'] == '是').to_numpy()
+    ax.scatter(t_all[~ndm], e_all[~ndm], color='0.72', s=34, zorder=3,
+               label='被支配档')
+    ax.scatter(t_all[ndm], e_all[ndm], color=C_C, s=150, marker='*', zorder=5,
+               edgecolor='black', linewidth=0.8, label='非支配档')
+    # 两档前沿点连成虚线，前沿就是这条线的左下端。
+    ax.plot(t_all[ndm], e_all[ndm], '--', color=C_C, lw=1.4, zorder=4)
+    # 前沿那两档只差 0.46 h、0.10 kWh，逐点标数字会糊成一团，改为一处带箭头的
+    # 文字说明；其余档位彼此分得开，照旧标数字。
+    fr = np.where(ndm)[0]
+    if len(fr):
+        ax.annotate('非支配前沿仅两档\n（%s 架次）'
+                    % '、'.join(str(k_all[i]) for i in fr),
+                    xy=(t_all[fr[-1]], e_all[fr[-1]]),
+                    xytext=(t_all[fr[-1]] + 3.2, e_all[fr[-1]] + 0.6),
+                    fontsize=10.5, va='center',
+                    arrowprops=dict(arrowstyle='->', color='black', lw=1.1))
+    for kk in (30, 40, 60, 80):
+        i = np.where(k_all == kk)[0]
+        if len(i):
+            ax.annotate(str(kk), (t_all[i[0]], e_all[i[0]]), textcoords='offset points',
+                        xytext=(7, 3), fontsize=10.5)
+    ax.set_xlabel('该档能耗最小解的作业时间 (h)')
+    ax.set_ylabel('该档最小总能耗 (kWh)')
+    ax.legend(loc='upper left', fontsize=9.5)
+    ax.set_title('逐架次扫描与非支配前沿')
     panel_tag(ax, '(a)')
 
-    # (b) 各区曲线族：同一服务区换机型/换架次的能耗代价量级差很远，用对数轴
+    # (b) 各区曲线族：按**机型组合**画（允许混用后组合串形如「B1+C1」，
+    # 不再是单一机型）。纯单机型组合按型着色，混用组合画成灰细线。
     ax = axes[1]
+    pure = area[~area['机型组合'].str.contains(r'\+')]
+    mixed = area[area['机型组合'].str.contains(r'\+')]
+    for _, g in mixed.groupby(['服务区', '机型组合']):
+        g = g.sort_values('架次数')
+        ax.plot(g['架次数'], g['能耗kWh'], '-', color='0.75', lw=0.9, zorder=1)
     for tid in ['A', 'B', 'C']:
-        sub = area[area['机型'] == tid]
-        for sid, g in sub.groupby('服务区'):
-            ax.plot(g['架次数'], g['能耗kWh'], '-', color=TYPE_COLOR[tid], alpha=0.35, lw=1.0)
-    for tid in ['A', 'B', 'C']:
-        sub = area[area['机型'] == tid]
-        ax.plot(sub['架次数'], sub['能耗kWh'], 'o', color=TYPE_COLOR[tid], ms=2.5, alpha=0.5)
+        sub = pure[pure['机型组合'].str.startswith(tid)]
+        for _, g in sub.groupby('服务区'):
+            g = g.sort_values('架次数')
+            ax.plot(g['架次数'], g['能耗kWh'], '-', color=TYPE_COLOR[tid],
+                    alpha=0.5, lw=1.1, zorder=2)
+        ax.plot(sub['架次数'], sub['能耗kWh'], 'o', color=TYPE_COLOR[tid], ms=2.5,
+                alpha=0.55, zorder=3)
     ax.set_yscale('log')
     ax.set_xlabel('架次数')
     ax.set_ylabel('架次能耗 (kWh，对数轴)')
     ax.set_title('各服务区「架次–能耗」曲线族')
-    ax.legend(handles=[Patch(color=TYPE_COLOR[t], label='机型 %s' % t) for t in 'ABC'],
-              loc='lower right')
+    hs = [Patch(color=TYPE_COLOR[t], label='纯 %s 型' % t) for t in 'ABC']
+    if len(mixed):
+        hs.append(Patch(color='0.75', label='混用机型组合'))
+    ax.legend(handles=hs, loc='lower right', fontsize=9.5)
     panel_tag(ax, '(b)')
 
     # (c) 临界 ρ：架次数随返航余量的阶梯跳变（只取全局那几行，机型级的是失效点）
@@ -231,16 +257,17 @@ def fig_q2_alns():
 
     fig, axes = plt.subplots(1, 3, figsize=(10.0, 3.7))
 
-    # (a) 收敛曲线。这条轨迹是**独立复跑**（同一套参数、不同随机流）用来展示收敛
-    # 形态的，其终值并不等于 ε-约束扫描的最优，故把扫描最优画成参考线，差距摆在
-    # 明面上——把复跑轨迹当成最终结果会虚报搜索质量。
+    # (a) 收敛曲线：这是**推荐档那一次真实运行**的轨迹（F12：原先这里另跑一次
+    # 1500 轮，轨迹终值与任何报告过的数字都对不上）。故轨迹的终值就是推荐解的
+    # 目标值，参考线取 Pareto 前沿里的最小目标值，两者在末端重合——重合本身
+    # 就是「曲线收敛到推荐解」的证据。
     ax = axes[0]
-    ax.plot(tr['迭代'], tr['最优目标值'], color=C_A, lw=2.2, label='独立复跑轨迹')
+    ax.plot(tr['迭代'], tr['最优目标值'], color=C_A, lw=2.2, label='推荐档实跑')
     # 图例文字必须短：三栏并排后本栏坐标区只有 1.85 in 宽，原来那条
     # 「ε-约束扫描最优 (0.182343)」把图例撑到 305 px，比坐标区本身（222 px）还宽，
     # 于是图例只能向左溢出、看起来像贴在左上角。数值改到正文与图题里给全。
     ax.axhline(par['目标值'].min(), color=C_C, ls='--', lw=2.0,
-               label='扫描最优 %.4f' % par['目标值'].min())
+               label='前沿最优 %.4f' % par['目标值'].min())
     ax.set_xlabel('迭代次数'); ax.set_ylabel('归一化目标值 F')
     ax.set_title('ALNS 收敛轨迹')
     ax.legend(loc='upper right', fontsize=9.5)
@@ -287,28 +314,52 @@ def fig_q2_alns():
             va='center', ha='left')
     panel_tag(ax, '(b)')
 
-    # (c) ε-约束前沿：架次数上限 → 实际架次 vs 完成时刻 / 能耗。
+    # (c) ε-约束扫描：架次数上限 → 实际架次 vs 完成时刻 / 能耗。
     # 六个点的「K≤xx」标注都挂在点上方 9 pt，顶端点若贴着轴顶，标注会被标题切掉。
+    #
+    # F11：q2_pareto.csv 现在同时含被支配档（末列「非支配」= 否），六档不全是前沿点。
+    # 若仍把六点连成一条折线，就等于把被支配档也画成了前沿。故只有非支配档实心连线，
+    # 被支配档画成空心点、不连线，并在图内用一行小字点明空心点的含义。
     ax = axes[2]
-    ax.plot(par['实际架次'], par['makespan_s'] / 3600, '-o', color=C_A, ms=8, lw=2.2,
-            label='完成时刻')
-    ax.set_ylim(2.00, 2.66)
-    # 六个点里 K≤30 与 K≤35 同为 29 架次、K≤40 为 30 架次，三个点挤在 22 px 内，
-    # 标注一律挂上方就会两两叠字。末两个改挂**下方**并再压低 4 pt，靠纵向错开让开。
+    ndm = (par['非支配'] == '是').to_numpy()
+    xk, ym = par['实际架次'].to_numpy(float), (par['makespan_s'] / 3600).to_numpy(float)
+    if ndm.any():
+        ax.plot(xk[ndm], ym[ndm], '-o', color=C_A, ms=8, lw=2.2, label='非支配档')
+    if (~ndm).any():
+        ax.plot(xk[~ndm], ym[~ndm], 'o', mfc='white', mec='0.45', ms=7.5, mew=1.5,
+                label='被支配档')
+    # 量程按数据取，理由同图 5.3(a)：写死的量程在数据变动后会把点整批挤出坐标轴，
+    # 而图上只留下一片空白，看不出是代码错了。
+    ms = par['makespan_s'] / 3600
+    ax.set_ylim(float(ms.min()) - 0.13 * (float(ms.max()) - float(ms.min())) - 0.06,
+                float(ms.max()) + 0.30 * (float(ms.max()) - float(ms.min())))
+    # 前沿上架次数相同的档（如 29 与 30）会挤在很近的横坐标上，标注一律挂上方就会
+    # 叠字；按横向间距判断，靠近的改挂**下方**靠纵向错开。
+    xs = par['实际架次'].to_numpy(float)
     for i, (_, row) in enumerate(par.iterrows()):
-        dy = 9 if i < len(par) - 2 else -13
+        near = any(abs(xs[j] - xs[i]) <= 2 and j != i for j in range(len(xs)))
+        dy = -13 if near else 9
         ax.annotate('K≤%d' % row['K上限'], xy=(row['实际架次'], row['makespan_s'] / 3600),
                     xytext=(0, dy), textcoords='offset points', fontsize=9.5, ha='center',
                     va='bottom' if dy > 0 else 'top')
     ax.set_xlabel('实际架次数'); ax.set_ylabel('完成时刻 (h)', color=C_A)
     ax.tick_params(axis='y', colors=C_A)
     ax2 = ax.twinx()
-    ax2.plot(par['实际架次'], par['能耗kWh'], '--s', color=C_C, ms=7, lw=2.0, label='总能耗')
+    ax2.plot(xk[ndm], par['能耗kWh'].to_numpy(float)[ndm], '--s', color=C_C, ms=7, lw=2.0,
+             label='能耗（非支配档）')
+    ax2.plot(xk[~ndm], par['能耗kWh'].to_numpy(float)[~ndm], 's', mfc='white', mec=C_C,
+             ms=6.5, mew=1.5, label='能耗（被支配档）')
     ax2.set_ylabel('总能耗 (kWh)', color=C_C)
     ax2.tick_params(axis='y', colors=C_C)
-    ax2.set_ylim(66, 94)
+    en = par['能耗kWh']
+    ax2.set_ylim(float(en.min()) - 0.10 * (float(en.max()) - float(en.min())) - 1.0,
+                 float(en.max()) + 0.18 * (float(en.max()) - float(en.min())))
     ax2.grid(False)
-    ax.set_title('ε-约束前沿（架次数上限扫描）')
+    # 图例只留「实心/空心」这一条关键区分，能耗两条曲线合并说明，避免本栏（1.85 in）
+    # 的图例撑到比坐标区还宽——图 6.2(a) 上已踩过这个坑。
+    h1, l1 = ax.get_legend_handles_labels()
+    ax.legend(h1, l1, fontsize=9, loc='lower right', framealpha=0.92, handlelength=1.6)
+    ax.set_title('ε-约束扫描（架次数上限）')
     panel_tag(ax, '(c)')
 
     fig.tight_layout(w_pad=3.2)
@@ -482,9 +533,12 @@ def fig_q2_exact():
     r1 = ex[ex['层级'] == 'B1'].iloc[0]
     r1p = ex[ex['层级'] == "B1'"].iloc[0]
     r2 = ex[ex['层级'] == 'B2'].iloc[0]
-    degrade = [(g_mk - float(r1['ALNS能耗'])) / float(r1['ALNS能耗']) * 100.0,
-               (g_td - float(r1p['精确能耗'])) / float(r1p['精确能耗']) * 100.0,
-               float(r2['能耗间隙pct'])]
+    # 劣化统一按 (启发式 − 精确) / 精确 定义，与表 6.x 的「精确相对启发式」同源；
+    # 早先柱 0 用 (贪心−精确)/贪心、柱 1 用 (贪心−精确)/精确，同一张图上两种分母，
+    # 与表里的数字对不上。
+    degrade = [(g_mk - float(r1['回放makespan_s'])) / float(r1['回放makespan_s']) * 100.0,
+               (g_td - float(r1p['回放加权时延'])) / float(r1p['回放加权时延']) * 100.0,
+               float(r2['上下界间隙']) * 100.0]
     names = ['B1\n完成时刻准则\n(118 二元变量)', "B1'\n加权时延准则\n(118 二元变量)",
              'B2\n自由指派\n(630 二元变量)']
     bars = ax.bar(np.arange(3), degrade, 0.52, color=[C_A, C_B, '#B0B0B0'],
@@ -500,11 +554,15 @@ def fig_q2_exact():
     for i, s in [(0, '精确解虽已证最优\n但违反 8 项硬时限'),
                  (1, '精确解虽已证最优\nmakespan 反升 4.59%')]:
         ax.text(i, 13, s, ha='center', fontsize=9.5, color=C_C)
-    ax.text(2.42, 71, '间隙 63.55% 未收敛、\n只作方向佐证，不称最优', ha='right',
-            va='top', fontsize=10, color=C_C)
+    # B2 那根柱画的不是「劣化」而是 MILP 的上下界间隙，量级差一个数量级（90% 对
+    # 2.4%/5.8%），且其可行上界本身还劣于贪心。量程按数据放开到柱顶之上，说明文字
+    # 一并上移，避免被 y 轴上限切掉——写死 86 会让 90.36% 的柱顶和文字一起消失。
+    ytop = max(degrade) * 1.22
+    ax.text(2.42, ytop * 0.97, '这是 MILP 的上下界间隙、非劣化\n90 s 内未收敛，且上界反劣于贪心\n不计入最优性结论',
+            ha='right', va='top', fontsize=9.5, color=C_C)
     ax.set_xticks(np.arange(3)); ax.set_xticklabels(names, fontsize=10.5)
-    ax.set_ylabel('贪心解相对精确解的劣化 (%)')
-    ax.set_ylim(0, 86)
+    ax.set_ylabel('启发式相对精确解的劣化 (%)')
+    ax.set_ylim(0, ytop)
     # 右边界放宽到 2.5：B2 那条说明文字右对齐在 x=2.42，默认的 5% 边距只到 2.39，
     # 文字尾巴会伸到坐标框外面去
     ax.set_xlim(-0.55, 2.50)
@@ -518,16 +576,27 @@ def fig_q2_exact():
 # ---------------------------------------------------------------- 问题三
 
 def _q3_context():
-    """问题三出图需要轨迹采样，故这里才碰求解器；其余图一律只读 CSV。"""
+    """问题三出图需要轨迹采样，故这里才碰求解器；其余图一律只读 CSV。
+
+    F05 之后问题三把**错峰后的最终方案**整份落盘（results/q3_solution.json），
+    本函数直接按 trip_id 取回路线、机型、开始时刻与逐箱指派，不再走
+    「读问题二方案 → 重解调度 → 按错峰表逐架次相加」这条二次拼装路径：那条
+    路径在错峰口径改变时（级联传播、就绪性修复、弃飞）会与结果表悄悄分叉，
+    而图上看不出来——图上少一段中继、时刻差几十秒，谁也不会察觉。
+    轨迹采样仍调用 q3.sample_trip_trajectory，它只做几何采样、不含调度决策。
+    """
     from core import load_data
-    from q2 import precompute_geometry, recommended
+    from q2 import precompute_geometry
     import q3
     d = load_data()
     d.geo_nodes, d.geo = precompute_geometry(d)
-    _, assignment, _, _ = recommended(d)
-    assignment = sorted(assignment, key=lambda x: x['start'])
-    sg = rd('q3_stagger.csv').sort_values('架次编号')
-    assignment = q3.shift_assignment(d, assignment, [float(v) for v in sg['推迟s']])
+    with open(os.path.join(RES, 'q3_solution.json'), encoding='utf-8') as f:
+        sol = json.load(f)
+    box_by_id = {b['id']: b for bs in d.boxes_by_service.values() for b in bs}
+    assignment = [dict(type=t['type'], route=list(t['route']), start=float(t['start']),
+                       boxes_at={s: [box_by_id[x] for x in ids]
+                                 for s, ids in t['box_ids_by_service'].items()})
+                  for t in sorted(sol['transport_trips'], key=lambda t: t['start'])]
     return d, q3, assignment
 
 
@@ -782,7 +851,9 @@ def fig_q4_partition():
     part = rd('q4_partition.csv')
     units = rd('q4_units.csv')
     allp = rd('q4_all_partitions.csv')
-    tp = rd('q2_transport_trips.csv')
+    # 架次→服务区取自**问题三的最终运输方案**：问题四就是从这张表出发做绑定的，
+    # 图与解同源。列名与问题二那张表一致（架次编号 / 访问服务区顺序）。
+    tp = rd('q3_transport_trips.csv')
 
     fig, axes = plt.subplots(1, 3, figsize=(10.8, 3.9))
 
@@ -986,23 +1057,24 @@ def _resource_usage():
       共享电池    [t0, t1 + 充电时长]        q2.py: bat['ready_at'] = 上式 + t_chg
       中继无人机  [t0, t1 + turnover]        q3.py: r['free_at']    = t_start + t_tot + turnover
       中继组件    [t0, t1 + 充电时长]        q3.py: c['ready_at']   = 上式 + charge_time(...)
-    运输架次按 q3_stagger.csv 的错峰量整体平移，与问题三的最终推荐方案一致。
+    运输架次读 q3_transport_trips.csv——那是**错峰后的最终方案**（F05 起由问题三
+    直接把最终时刻落盘）。旧版读问题二的 q2_transport_trips.csv 再逐架次加上
+    q3_stagger.csv 的推迟量，是同一件事的第二次拼装：两处口径一旦不同（例如
+    问题三新增了就绪性修复而错峰表只记首轮推迟），图上与结果表就会各说一套。
     """
     tt = load_transport_uav_types()
     bats = load_batteries()
     rt = load_relay_type()
     _n_rc, tf_r = load_relay_batteries()
 
-    trips = rd('q2_transport_trips.csv')
-    stag = rd('q3_stagger.csv')
+    trips = rd('q3_transport_trips.csv')
     rel = rd('q3_relay_trips.csv')
-    off = dict(zip(stag['架次编号'], stag['推迟s']))
 
     use = {}
     for _, r in trips.iterrows():
         tid, g = r['架次编号'], r['机型编号']
-        t0 = float(r['开始时刻s']) + float(off[tid])
-        t1 = t0 + (float(r['返回O01时刻s']) - float(r['开始时刻s']))
+        t0 = float(r['开始时刻s'])
+        t1 = float(r['返回O01时刻s'])
         soc = 1.0 - float(r['架次能耗kWh']) / tt[g]['E_use']
         use.setdefault(('uav:', r['无人机编号']), []).append((t0, t1, tid))
         use.setdefault(('bat:', r['电池编号']), []).append(
@@ -1131,7 +1203,8 @@ def fig_solution_network():
     """跨问题方案网络：服务区 → 运输架次 → 机型／中继悬停站（图 9.x）。
 
     四层连边全部由独立脚本产出的 CSV 还原：服务区—架次与架次—机型取自
-    q2_transport_trips.csv，架次—悬停站取自 q3_comm_phases.csv ⋈ q3_relay_trips.csv。
+    q3_transport_trips.csv（问题三的最终方案，也即问题四的输入），
+    架次—悬停站取自 q3_comm_phases.csv ⋈ q3_relay_trips.csv。
 
     **不使用任何 nx.*_layout**：networkx 3.7 的 subgraph 视图迭代 set，布局会随
     PYTHONHASHSEED 漂移、破坏逐字节可复现（fig_q4_partition 内已记录过同类事故）。
@@ -1139,7 +1212,7 @@ def fig_solution_network():
     """
     import networkx as nx
 
-    trips = rd('q2_transport_trips.csv')
+    trips = rd('q3_transport_trips.csv')
     rtrips = rd('q3_relay_trips.csv')
     phases = rd('q3_comm_phases.csv')
 

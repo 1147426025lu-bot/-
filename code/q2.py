@@ -27,6 +27,8 @@ import random
 import time
 from core import (T_DEC, E_DEC, load_data, ll_to_xy, segment_time, segment_energy,
                   segment_geometry, equivalent_range, charge_time, max_safe_payload)
+from solution_io import (build_q2_solution, save_solution, load_solution,
+                         assign_trip_ids)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, '..', 'results')
@@ -44,6 +46,12 @@ BASE_TOL = 1e-6
 # 链路各跑各的，正文数字对不上）。故权威解在 main() 里实跑一次后写盘，
 # 三个下游脚本用 recommended() 毫秒级读回，保证「同一份解」而非「同一个算法」。
 REC_CACHE = os.path.join(OUT, 'q2_recommended.json')
+
+# 完整最终方案（含实体指派、稳定 trip_id 与逐箱交付时刻）。与 REC_CACHE 的区别：
+# REC_CACHE 只存**生成输入**（路线 + 顺序），下游靠重跑 schedule() 还原，调度器一改
+# 就会还原成另一套指派；SOL_CACHE 存的是**算完的最终方案**，下游按 trip_id 外键
+# 连接，不再依赖「重跑能得到同样结果」这个隐含前提。
+SOL_CACHE = os.path.join(OUT, 'q2_solution.json')
 
 
 # ---------------------------------------------------------------------------
@@ -463,6 +471,7 @@ W_TARD = 1.0
 W_MS = 0.30
 K_PEN = 0.50          # 超出 ε 上界的每架次罚（归一化后单位）
 GROUP_EVAL_TOPK = 10  # 成组修复里真解码评估的候选上限（见 repair_group）
+ARCHIVE_MAX = 12      # 可行档案的保留条数（按目标值排序，见 alns 的 _archive）
 
 
 # --- 解的内部表示：trips = [{'route': [...], 'boxes': [...]}], order = [trips 下标]
@@ -815,14 +824,15 @@ REPAIR_OPS = [repair_greedy, repair_regret2, repair_newtrip, repair_group]
 # --- 主循环 ----------------------------------------------------------------
 def alns(d, init_trips, k_target=None, n_iter=3000, seed=ALNS_SEED,
          use_order=True, freeze_boxes=False, ref_tard=1.0, ref_ms=1.0,
-         trace=None, mode='time', ref_E=1.0, t0=None):
+         trace=None, mode='time', ref_E=1.0, t0=None, archive=None):
     """
     自适应大邻域搜索。
       use_order    False = 派工顺序恒按紧迫度（消融用）
       freeze_boxes True  = 只搜顺序（消融"仅顺序"用）
       t0           初始温度；None = 用 T0（时效口径的标定值）。
                    mode='energy' 时目标量级不同，必须由调用方给出匹配的 t0。
-    返回 (best_trips, best_order, best_metrics, best_f)
+      archive      调用方传入的空列表：就地收集**可行档案**（见 _archive）。
+    返回 (best_trips, best_order, best_metrics, best_f, 算子权重)
     """
     rng = random.Random(seed)
     trips = [dict(route=list(t['route']), boxes=list(t['boxes'])) for t in init_trips]
@@ -847,6 +857,32 @@ def alns(d, init_trips, k_target=None, n_iter=3000, seed=ALNS_SEED,
     def norm(w):
         s = sum(w)
         return [x / s for x in w]
+
+    arch = [] if archive is None else archive
+
+    def _archive(f, m, tr, od):
+        """
+        可行档案（ε-约束里 K 是货真价实的约束，而不是一个软罚）。
+
+        搜索的中间态仍允许 n_trips > K：破坏算子拆散架次后先超后并，禁掉超 K 会让
+        修复无路可走。但**档案只收** hard_viol == 0 且 n_trips <= k_target 的解，
+        供 solve_recommended 取用；拿超 K 的解当该档答案正是要修掉的缺陷。
+        """
+        if not math.isfinite(f) or m is None or m['hard_viol'] != 0:
+            return
+        if k_target is not None and m['n_trips'] > k_target:
+            return
+        sig = (m['n_trips'], round(m['makespan'], 6), round(m['total_E'], 6),
+               round(m['tardiness'], 6))
+        if any(x['sig'] == sig for x in arch):
+            return
+        arch.append(dict(
+            sig=sig, f=f, metrics=dict(m), order=list(od),
+            trips=[dict(route=list(t['route']), boxes=list(t['boxes'])) for t in tr]))
+        arch.sort(key=lambda x: (x['f'], x['metrics']['n_trips']))
+        del arch[ARCHIVE_MAX:]
+
+    _archive(f_cur, m_cur, trips, order)
 
     for it in range(n_iter):
         T = T0 * (T1 / T0) ** (it / max(1, n_iter - 1))
@@ -896,6 +932,8 @@ def alns(d, init_trips, k_target=None, n_iter=3000, seed=ALNS_SEED,
             new_order = _default_order(d, new_trips)
         f_new, m_new = objective(d, new_trips, new_order, k_target, ref_tard, ref_ms,
                                  mode, ref_E)
+        # 档案收集与接受与否无关：被拒绝的可行解也可能是该档更好的可行解
+        _archive(f_new, m_new, new_trips, new_order)
         accept = False
         if math.isfinite(f_new):
             if f_new < f_cur:
@@ -930,11 +968,16 @@ def alns(d, init_trips, k_target=None, n_iter=3000, seed=ALNS_SEED,
                     w_r[k] = max(0.05, 0.7 * w_r[k] + 0.3 * (s_r[k] / c_r[k]))
                 s_r[k] = 0.0; c_r[k] = 0
         if trace is not None and (it % max(1, n_iter // 60) == 0 or it == n_iter - 1):
+            # 两个量都记：最优目标值 best_f（算法真正跟踪的当代最优，允许架次超 K），
+            # 以及可行档案内最优（满足 n_trips<=K）。两者之差就是 ε 约束的代价，
+            # 只记前者会把"约束前"的曲线当成推荐解，只记后者看不到搜索本身。
             trace.append((it + 1, best_f if math.isfinite(best_f) else float('nan'),
                           best_m['makespan'] if best_m else float('nan'),
                           best_m['tardiness'] if best_m else float('nan'),
                           best_m['total_E'] if best_m else float('nan'),
-                          best_m['n_trips'] if best_m else 0))
+                          best_m['n_trips'] if best_m else 0,
+                          arch[0]['f'] if arch else float('nan'),
+                          arch[0]['metrics']['n_trips'] if arch else 0))
     return best_trips, best_order, best_m, best_f, (norm(w_d), norm(w_r))
 
 
@@ -986,25 +1029,44 @@ def solve_recommended(d, n_iter=4000, verbose=False):
     runs = {}
     for K in K_TARGETS:
         t0 = time.time()
+        arch, tr = [], []
         bt, bo, bm, bf, wts = alns(d, init, k_target=K, n_iter=n_iter,
-                                  seed=ALNS_SEED + K, ref_tard=ref_tard, ref_ms=ref_ms)
+                                  seed=ALNS_SEED + K, ref_tard=ref_tard, ref_ms=ref_ms,
+                                  trace=tr, archive=arch)
         runs[K] = dict(trips=bt, order=bo, metrics=bm, f=bf,
-                       secs=time.time() - t0, weights=wts)
+                       secs=time.time() - t0, weights=wts,
+                       archive=arch, trace=tr)
         if verbose:
-            print(f'  K<={K:2d}: 实际架次={bm["n_trips"]:2d} E={bm["total_E"]:7.3f} '
+            print(f'  K<={K:2d}: 搜索末态 架次={bm["n_trips"]:2d} E={bm["total_E"]:7.3f} '
                   f'makespan={bm["makespan"]:9.1f} 时延={bm["tardiness"]:10.1f} '
-                  f'硬违反={bm["hard_viol"]} ({runs[K]["secs"]:.1f}s)')
-    # 推荐：时效优先口径下的最优可行解
-    feas = {K: r for K, r in runs.items() if r['metrics'] and r['metrics']['hard_viol'] == 0}
-    K_best = min(feas, key=lambda K: (feas[K]['f'], runs[K]['metrics']['n_trips']))
-    rec = runs[K_best]
+                  f'硬违反={bm["hard_viol"]}；可行档案 {len(arch)} 条'
+                  f'{"，档内最优 架次=%d E=%.3f" % (arch[0]["metrics"]["n_trips"], arch[0]["metrics"]["total_E"]) if arch else "（本档无可行解）"}'
+                  f' ({runs[K]["secs"]:.1f}s)')
+    # 推荐解只从**可行档案**里取：档案内每条都满足 硬违反=0 且 n_trips<=K。
+    # 搜索末态 best_trips 可能停在超 K 的中间态（破坏后尚未并回），不得当该档答案。
+    cand = [(r['archive'][0], K) for K, r in runs.items() if r['archive']]
+    if not cand:
+        raise RuntimeError('ε-约束全部档位均未找到可行解（硬违反为 0 且 n_trips<=K）；'
+                           '不得用超 K 的解顶替')
+    entry, K_best = min(cand, key=lambda p: (p[0]['f'], p[0]['metrics']['n_trips'], p[1]))
+    rec = entry
     st = to_sched_trips(d, rec['trips'])
     asg = schedule(d, st, order=rec['order'])
     m = evaluate(d, asg)
     assert m['hard_viol'] == 0, '推荐方案必须零硬约束违反'
+    assert m['n_trips'] <= K_best, '推荐方案超出所选 ε 档位，档案筛选失效'
     save_recommended(d, st, rec['order'], m)
-    return st, asg, m, dict(runs=runs, K=K_best, base=base_m,
-                            ref_tard=ref_tard, ref_ms=ref_ms, init=init)
+    info = dict(runs=runs, K=K_best, base=base_m, ref_tard=ref_tard, ref_ms=ref_ms,
+                init=init, n_iter=n_iter, K_targets=list(K_TARGETS),
+                rec=dict(K=K_best, f=entry['f'], metrics=dict(entry['metrics']),
+                         trace=runs[K_best]['trace']))
+    # 完整最终方案落盘（下游问题三、问题四的唯一真相源）
+    sol = build_q2_solution(d, asg, m, rec['order'], info, seed=ALNS_SEED)
+    info['solution_id'] = save_solution(SOL_CACHE, sol)
+    if verbose:
+        print(f'  已落盘完整方案 {os.path.basename(SOL_CACHE)} '
+              f'（solution_id={info["solution_id"]}，{len(sol["transport_trips"])} 架次）')
+    return st, asg, m, info
 
 
 # ---------------------------------------------------------------------------
@@ -1180,9 +1242,15 @@ def main():
     print('=' * 74)
     print('ε-约束扫描架次数 K（ALNS，时效优先目标）')
     st, asg, m, info = solve_recommended(d, n_iter=4000, verbose=True)
-    print(f'  推荐（K<={info["K"]}）: 架次={m["n_trips"]} 能耗={m["total_E"]:.3f} kWh '
-          f'makespan={m["makespan"]:.1f} s ({m["makespan"]/3600:.2f} h) '
-          f'加权时延={m["tardiness"]:.0f} 硬违反={m["hard_viol"]}')
+    assert m['n_trips'] <= info['K'], '推荐解超出所选 ε 档位'
+    print(f'  推荐（取自 K<={info["K"]} 的可行档案）: 架次={m["n_trips"]} '
+          f'能耗={m["total_E"]:.3f} kWh makespan={m["makespan"]:.1f} s '
+          f'({m["makespan"]/3600:.2f} h) 加权时延={m["tardiness"]:.0f} 硬违反={m["hard_viol"]}')
+    n_no = [K for K, r in sorted(info['runs'].items()) if not r['archive']]
+    print('  各档是否有可行解: %s%s'
+          % ('、'.join('%d:%s' % (K, '有' if info['runs'][K]['archive'] else '无')
+                       for K in sorted(info['runs'])),
+             '' if not n_no else '；无可行解的档位 %s 按「未找到」如实报出' % n_no))
 
     # --- 消融 ---------------------------------------------------------------
     print('=' * 74)
@@ -1195,8 +1263,9 @@ def main():
     # --- 导出 ---------------------------------------------------------------
     export(d, asg, info, abl)
     print('=' * 74)
-    print(f'已导出 q2_transport_trips.csv / q2_box_delivery.csv / q2_pareto.csv / '
-          f'q2_alns_trace.csv / q2_ablation.csv  总耗时 {time.time()-t_start:.1f}s')
+    print(f'已导出 q2_transport_trips.csv / q2_box_delivery.csv / q2_scan.csv / '
+          f'q2_pareto.csv / q2_alns_trace.csv / q2_ablation.csv  总耗时 '
+          f'{time.time()-t_start:.1f}s')
 
 
 def memo_crosscheck(d, n=1000, seed=7):
@@ -1226,40 +1295,86 @@ def memo_crosscheck(d, n=1000, seed=7):
 
 
 def export(d, asg, info, abl):
-    assignment_sorted = sorted(asg, key=lambda x: x['start'])
+    # 编号只认 q2_solution.json 里冻结的那一份：这里按同一函数（assign_trip_ids）
+    # 复算并核对集合相等，任何「排序后重编号」都会被这条断言挡住。
+    ids = assign_trip_ids(asg)
+    stored = load_solution(SOL_CACHE, stage='q2')
+    if sorted(ids) != sorted(t['trip_id'] for t in stored['transport_trips']):
+        raise AssertionError('导出编号与已落盘方案不一致：架次被重新编号')
+    rows_of = list(zip(asg, ids))
+    rows_of.sort(key=lambda p: p[1])
     q2_rows, deliver_rows = [], []
-    for i, a in enumerate(assignment_sorted):
+    for a, tid in rows_of:
         q2_rows.append(dict(
-            架次编号=f'T{i+1:02d}', 无人机编号=a['uav'], 机型编号=a['type'],
+            架次编号=tid, 无人机编号=a['uav'], 机型编号=a['type'],
             电池编号=a['battery'], 开始时刻s=round(a['start'], T_DEC),
             访问服务区顺序='->'.join(a['route']), 返回O01时刻s=round(a['start'] + a['duration'], T_DEC),
             架次能耗kWh=round(a['E'], E_DEC)))
         for sid, bs in a['boxes_at'].items():
             for b in bs:
                 deliver_rows.append(dict(
-                    货箱编号=b['id'], 架次编号=f'T{i+1:02d}', 服务区编号=sid,
+                    货箱编号=b['id'], 架次编号=tid, 服务区编号=sid,
                     交付完成时刻s=round(a['deliver_abs'][b['id']], T_DEC)))
     pd.DataFrame(q2_rows).to_csv(os.path.join(OUT, 'q2_transport_trips.csv'), index=False)
     pd.DataFrame(deliver_rows).to_csv(os.path.join(OUT, 'q2_box_delivery.csv'), index=False)
 
-    # Pareto / ε-约束扫描结果
-    rows = []
+    # ---- ε-约束扫描全表（原始记录，含搜索末态与可行档案两种情况）--------------
+    # 末态可能超 K（破坏后尚未并回），档案内则必定满足 n_trips<=K；两者都如实写出，
+    # 不做取舍。推荐解取的是档案内最优（见 solve_recommended）。
+    scan = []
     for K, r in sorted(info['runs'].items()):
-        m = r['metrics']
-        if m is None:
-            continue
-        rows.append(dict(K上限=K, 实际架次=m['n_trips'], 能耗kWh=round(m['total_E'], E_DEC),
-                         makespan_s=round(m['makespan'], T_DEC), 加权时延=round(m['tardiness'], 3),
-                         硬约束违反=m['hard_viol'], 目标值=round(r['f'], 6),
-                         耗时s=round(r['secs'], 2)))
-    df = pd.DataFrame(rows)
-    df.to_csv(os.path.join(OUT, 'q2_pareto.csv'), index=False)
+        m, a = r['metrics'], r['archive']
+        top = a[0]['metrics'] if a else None
+        scan.append(dict(
+            K上限=K,
+            末态架次=(None if m is None else m['n_trips']),
+            末态能耗kWh=(None if m is None else round(m['total_E'], E_DEC)),
+            末态硬违反=(None if m is None else m['hard_viol']),
+            档案条数=len(a), 档案可行=('是' if a else '否'),
+            档案架次=(None if top is None else top['n_trips']),
+            档案能耗kWh=(None if top is None else round(top['total_E'], E_DEC)),
+            档案makespan_s=(None if top is None else round(top['makespan'], T_DEC)),
+            档案加权时延=(None if top is None else round(top['tardiness'], 3)),
+            档案目标值=(None if top is None else round(a[0]['f'], 6)),
+            耗时s=round(r['secs'], 2)))
+    pd.DataFrame(scan).to_csv(os.path.join(OUT, 'q2_scan.csv'), index=False)
 
-    # ALNS 收敛轨迹（重跑一次带 trace，用于绘图）
-    tr = []
-    alns(d, info['init'], k_target=info['K'], n_iter=1500, seed=ALNS_SEED + info['K'],
-         ref_tard=info['ref_tard'], ref_ms=info['ref_ms'], trace=tr)
-    pd.DataFrame(tr, columns=['迭代', '最优目标值', 'makespan_s', '加权时延', '能耗kWh', '架次']
+    # ---- 四维非支配前沿：对**全精度**指标调用 pareto_front() -------------------
+    # 只用「档案内最优」这一行代表该档（每档一个解），维度为
+    # (架次, 完工时间, 加权时延, 能耗)。被支配行**不写进** q2_pareto.csv，
+    # 但保留在 q2_scan.csv 里，读者可自行核对谁支配了谁。
+    cand = []
+    for K, r in sorted(info['runs'].items()):
+        if not r['archive']:
+            continue
+        e = r['archive'][0]
+        # 只展开 metrics：evaluate() 的返回里已经有 n_trips/makespan/tardiness/
+        # total_E/hard_viol，再显式传一遍同名的关键字会撞成
+        # 「TypeError: dict() got multiple values for keyword argument」。
+        cand.append(dict(K上限=K, **e['metrics'], 目标值=e['f'], 耗时s=r['secs']))
+    front = pareto_front(cand)
+    on_front = {(round(x['n_trips'], 9), round(x['makespan'], 9),
+                 round(x['tardiness'], 9), round(x['total_E'], 9)) for x in front}
+    rows = []
+    for c in cand:
+        key = (round(c['n_trips'], 9), round(c['makespan'], 9),
+               round(c['tardiness'], 9), round(c['total_E'], 9))
+        rows.append(dict(
+            K上限=c['K上限'], 实际架次=c['n_trips'], 能耗kWh=round(c['total_E'], E_DEC),
+            makespan_s=round(c['makespan'], T_DEC), 加权时延=round(c['tardiness'], 3),
+            硬约束违反=c['hard_viol'], 目标值=round(c['目标值'], 6),
+            非支配=('是' if key in on_front else '否'), 耗时s=round(c['耗时s'], 2)))
+    pd.DataFrame(rows).to_csv(os.path.join(OUT, 'q2_pareto.csv'), index=False)
+    # 前沿断言：写进 q2_pareto.csv 的「是」行之间必须互不支配；被支配行不得标「是」
+    n_star = sum(1 for r_ in rows if r_['非支配'] == '是')
+    assert n_star == len(front), '非支配标记数与 pareto_front 结果不符'
+
+    # ---- ALNS 收敛轨迹：直接用推荐档**那一次**真实运行记录（F12）--------------
+    # 原来这里另跑一次 1500 轮，轨迹的终值与推荐解不是同一次搜索的结果，
+    # 画出来的收敛曲线不对应任何一个报告过的数字；现在直接导出真实运行的 trace。
+    tr = info['rec']['trace']
+    pd.DataFrame(tr, columns=['迭代', '最优目标值', 'makespan_s', '加权时延', '能耗kWh', '架次',
+                              '档案最优目标值', '档案架次']
                  ).to_csv(os.path.join(OUT, 'q2_alns_trace.csv'), index=False)
 
     pd.DataFrame(abl).to_csv(os.path.join(OUT, 'q2_ablation.csv'), index=False)

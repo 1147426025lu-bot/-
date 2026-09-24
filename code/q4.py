@@ -25,11 +25,14 @@ import os
 from scipy.optimize import milp, LinearConstraint, Bounds
 from scipy import sparse
 from core import T_DEC, E_DEC, load_data, charge_time
-from q2 import precompute_geometry, recommended
+from q2 import precompute_geometry
+from solution_io import (load_solution, input_hashes, solver_hashes, Q3_SOLVER_FILES)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, '..', 'results')
 os.makedirs(OUT, exist_ok=True)
+
+Q3_SOL = os.path.join(OUT, 'q3_solution.json')
 
 TYPES = ['A', 'B', 'C']
 RES_KEYS = [f'{g}_uav' for g in TYPES] + [f'{g}_bat' for g in TYPES] + ['relay', 'relay_comp']
@@ -135,7 +138,10 @@ def group_resources(trip_ids, trips, relay_of_group):
     for g in TYPES:
         res[f'{g}_uav'] = peak_concurrency([(a['start'], a['end']) for a in by_type[g]])
         res[f'{g}_bat'] = peak_concurrency([(a['start'], a['bat_end']) for a in by_type[g]])
-    relay_veh = [(x['start'], x['return_t']) for x in relay_of_group]
+    # 中继无人机：占用到「返航 + 周转时间」为止，与 q3.schedule_relays 同口径。
+    # 旧版只算到返航，少算了一段周转（本算例 300 s），于是同一条中继链上首尾
+    # 相接的两个任务会被算成不重叠，峰值需求被系统性低估。
+    relay_veh = [(x['start'], x['return_t'] + x['turnover']) for x in relay_of_group]
     relay_cmp = [(x['start'], x['cmp_end']) for x in relay_of_group]
     res['relay'] = peak_concurrency(relay_veh)
     res['relay_comp'] = peak_concurrency(relay_cmp)
@@ -147,6 +153,89 @@ def workload(trip_ids, trips, relay_of_group):
     w = sum(trips[k]['duration'] for k in trip_ids)
     w += sum(x['t_tot'] for x in relay_of_group)
     return w
+
+
+def build_assignment(q3_sol, d):
+    """
+    由问题三方案构造资源核算用的运输架次记录：补齐充电结束时刻 `bat_end`
+    （与 q2.resource_usage 同口径），并按开始时刻排序、写下标 `idx`。
+    """
+    out = []
+    for t in q3_sol['transport_trips']:
+        a = dict(t)
+        a['E'] = float(t['energy_kwh'])
+        a['end'] = t['start'] + t['duration']
+        soc = 1.0 - a['E'] / d.transport_types[a['type']]['E_use']
+        a['bat_end'] = a['end'] + charge_time(soc, d.batteries[a['type']][1])
+        out.append(a)
+    out.sort(key=lambda x: x['start'])
+    for k, a in enumerate(out):
+        a['idx'] = k
+    return out
+
+
+def build_relays(q3_sol, d):
+    """由问题三方案构造中继记录：占用到「返航 + 周转」，能源组件到充电完成。"""
+    rt = d.relay_type
+    return [dict(id=r['relay_trip_id'], station=r['station_id'], start=r['start'],
+                 return_t=r['return_time'], t_tot=r['return_time'] - r['start'],
+                 turnover=float(rt['turnover']),
+                 cmp_end=r['return_time'] + charge_time(
+                     1.0 - r['energy_kwh'] / rt['E_use'], d.relay_batteries[1]))
+            for r in q3_sol['relay_trips']]
+
+
+def join_relays(q3_sol, relays):
+    """
+    外键连接（F03）：运输架次编号 → 服务它的中继架次集合，一律按 `trip_id` 查表。
+
+    旧版 `trip_of = {int(s[1:]): i for i, s in enumerate(sorted(set(...)))}` 把
+    失效表里出现过的编号按**排序位置**映射回架次下标：只要某架次没有失效区间，
+    从它往后的映射就整体错位。这里按编号直接查，且**没有中继需求的运输架次其
+    集合为空**，而不是从表里消失。未知编号一律显式报错。
+    """
+    relay_by_id = {x['id']: x for x in relays}
+    trip_by_id = {t['trip_id']: t for t in q3_sol['transport_trips']}
+    out = {t['trip_id']: [] for t in q3_sol['transport_trips']}
+    for rec in q3_sol['intervals']:
+        tid, rid = rec['trip_id'], rec['relay_trip_id']
+        if tid not in trip_by_id:
+            raise ValueError(f'失效区间 {rec["interval_id"]} 引用了未知运输架次 {tid}')
+        if not rid:
+            continue
+        if rid not in relay_by_id:
+            raise ValueError(f'失效区间 {rec["interval_id"]} 引用了未知中继架次 {rid}')
+        if relay_by_id[rid] not in out[tid]:
+            out[tid].append(relay_by_id[rid])
+    return out
+
+
+def color_intervals(intervals, tags, prefix):
+    """
+    区间着色：把 [(start, end)] 按开始时刻升序逐个分给**最早空闲**的资源，
+    资源编号带组前缀（如 G1-U1），不跨组共用。
+
+    这是「峰值重叠数 = 需要配备的资源数」这条口径的构造性证明：按开始时刻升序
+    贪心分配，当且仅当所有已编号资源都在忙时才新开一个，故用到的编号数恰等于
+    峰值重叠数。只报峰值而不给出一个真把每个区间落到具体编号上的分配，等于把
+    「数量」当成「可实现」——两者中间差着这一步。
+
+    返回 (分配表, 用到的资源数)。分配表每项 dict(资源编号, 起点, 终点, 标签)。
+    """
+    free, out = [], []
+    for (s, e), tag in sorted(zip(intervals, tags), key=lambda p: (p[0][0], p[0][1], p[1])):
+        hit = None
+        for i, t_free in enumerate(free):
+            if t_free <= s + 1e-9:
+                hit = i
+                break
+        if hit is None:
+            free.append(e)
+            hit = len(free) - 1
+        else:
+            free[hit] = e
+        out.append(dict(资源编号=f'{prefix}-{hit + 1}', 起点=s, 终点=e, 标签=tag))
+    return out, len(free)
 
 
 # ---------------------------------------------------------------------------
@@ -192,33 +281,21 @@ def solve_group_column_ilp(n_units, K, cost_of):
 def main():
     d = load_data()
     d.geo_nodes, d.geo = precompute_geometry(d)
-    trips, assignment, q2_m, q2_order = recommended(d)
-    assignment = sorted(assignment, key=lambda x: x['start'])
-    for k, a in enumerate(assignment):
-        a['end'] = a['start'] + a['duration']
-        soc = 1.0 - a['E'] / d.transport_types[a['type']]['E_use']
-        a['bat_end'] = a['end'] + charge_time(soc, d.batteries[a['type']][1])
-        a['idx'] = k
-
-    # 问题三的中继方案：直接读结果表，不再自己重跑一遍选站（消除双份真相源）
-    iv = pd.read_csv(os.path.join(OUT, 'q3_intervals.csv'), encoding='utf-8-sig')
-    rl = pd.read_csv(os.path.join(OUT, 'q3_relay_trips.csv'), encoding='utf-8-sig')
     rt = d.relay_type
-    relays = []
-    for _, r in rl.iterrows():
-        soc_end = 1.0 - r['架次能耗kWh'] / rt['E_use']
-        relays.append(dict(id=r['中继架次编号'], station=r['悬停站编号'],
-                           start=float(r['开始时刻s']), return_t=float(r['返回O01时刻s']),
-                           t_tot=float(r['返回O01时刻s']) - float(r['开始时刻s']),
-                           cmp_end=float(r['返回O01时刻s']) + charge_time(soc_end, d.relay_batteries[1])))
-    trip_of = {int(s[1:]): i for i, s in enumerate(sorted(set(iv['运输架次编号'])))}
-    relay_by_id = {x['id']: x for x in relays}
-    # 每个运输架次 → 服务它的中继架次集合
-    relay_of_trip = {k: [] for k in range(len(assignment))}
-    for _, r in iv.iterrows():
-        rid = r['中继架次编号']
-        if isinstance(rid, str) and rid.strip() and rid in relay_by_id:
-            relay_of_trip[trip_of[int(r['运输架次编号'][1:])]].append(relay_by_id[rid])
+
+    # 方案来源**唯一**：问题三落盘的完整方案（错峰后的运输时刻 + 中继绑定）。
+    # 旧版走 `recommended(d)` 重新读问题二并重解调度，拿到的是**错峰前**的开始
+    # 时刻，与问题三报出的联合方案不是同一个解——问题四的峰值并发、缺口、均衡度
+    # 全都在算另一个方案。这里改为读问题三的方案，并先验 solution_id 与来源哈希。
+    q3_sol = load_solution(Q3_SOL, stage='q3',
+                           input_hashes_expect=input_hashes(),
+                           solver_hashes_expect=solver_hashes(Q3_SOLVER_FILES))
+    print(f'读取问题三方案 {q3_sol["solution_id"]}（来源 {q3_sol["source_solution_id"]}，'
+          f'{len(q3_sol["transport_trips"])} 运输架次 / {len(q3_sol["relay_trips"])} 中继架次）')
+
+    assignment = build_assignment(q3_sol, d)
+    relays = build_relays(q3_sol, d)
+    relay_of_trip = join_relays(q3_sol, relays)
 
     units = atomic_units(d, assignment)
     n = len(units)
@@ -244,7 +321,7 @@ def main():
         unit_trips.append(tids)
         rr, seen = [], set()
         for k in tids:
-            for x in relay_of_trip[k]:
+            for x in relay_of_trip[assignment[k]['trip_id']]:
                 if x['id'] not in seen:
                     seen.add(x['id'])
                     rr.append(x)
@@ -317,6 +394,7 @@ def main():
         ilp = solve_group_column_ilp(n, K, cost_of)
         check[K] = ilp
 
+    alloc_rows = []
     for K, n_part, best, relay_min, n_feas in summary:
         print('=' * 74)
         print(f'K={K}：枚举 {n_part} 个分区（理论 {_stirling(n, K)} 个），'
@@ -333,12 +411,48 @@ def main():
             rows.append(dict(K=K, 任务组编号=gi + 1, 服务区列表=','.join(us),
                              **{RES_LABEL[k]: res[k] for k in RES_KEYS},
                              工作量h=round(best['W'][gi] / 3600.0, 4)))
+
+            # 峰值需求必须**可实现**：给出一个真把每个占用区间落到具体资源编号上的
+            # 着色分配（按开始时刻升序分给最早空闲资源，编号带组前缀，不跨组共用），
+            # 并核对用到的编号数恰等于峰值重叠数。
+            _res, _w, g_tids, g_rr = eval_group(members)
+            gp = f'G{gi + 1}'
+            specs = []
+            for g in TYPES:
+                kk = [k for k in g_tids if assignment[k]['type'] == g]
+                specs.append((f'{g}_uav', gp + '-U' + g,
+                              [(assignment[k]['start'], assignment[k]['end']) for k in kk],
+                              [assignment[k]['trip_id'] for k in kk]))
+                specs.append((f'{g}_bat', gp + '-B' + g,
+                              [(assignment[k]['start'], assignment[k]['bat_end']) for k in kk],
+                              [assignment[k]['trip_id'] for k in kk]))
+            specs.append(('relay', gp + '-R',
+                          [(x['start'], x['return_t'] + x['turnover']) for x in g_rr],
+                          [x['id'] for x in g_rr]))
+            specs.append(('relay_comp', gp + '-RC',
+                          [(x['start'], x['cmp_end']) for x in g_rr],
+                          [x['id'] for x in g_rr]))
+            for key, prefix, ivs, tags in specs:
+                alloc, n_used = color_intervals(ivs, tags, prefix)
+                if n_used != res[key]:
+                    raise AssertionError(
+                        '%s 组%d 的 %s：着色用掉 %d 个资源，峰值需求却报 %d'
+                        % (prefix, gi + 1, key, n_used, res[key]))
+                for r in alloc:
+                    alloc_rows.append(dict(K=K, 任务组编号=gi + 1, 资源类型=RES_LABEL[key],
+                                           资源编号=r['资源编号'], 占用起点s=round(r['起点'], T_DEC),
+                                           占用终点s=round(r['终点'], T_DEC), 对象编号=r['标签']))
+            print(f'      资源分配可实现：着色编号数与峰值需求逐项一致'
+                  f'（{sum(1 for s in specs)} 类资源）')
         # 两种口径必须分开列：混在一起会写出「需求 3、库存 2、缺口 0」这种自相矛盾
         # 的行——那是分组口径把缺口按组各算一遍再求和的结果，掩盖了总量超配。
-        print('   ---- 总量口径（全队共用库存；这才是能否落地的判据）----')
+        # 全队**单份**库存：N[r] = Σ_g n[g,r]（各组的同类需求相加），再与库存 S[r]
+        # 比，Gap[r] = max(0, N[r] − S[r])。绝不是「每组各发一整套库存再比」——
+        # 那等于把库存放大 K 倍，缺口必然恒为 0，等于没查。
+        print('   ---- 单份库存口径（N[r]=Σ_g n[g,r] 与库存 S[r] 比；这才是能否落地的判据）----')
         for k in RES_KEYS:
-            print(f'     {RES_LABEL[k]}: 总需求 {best["tot"][k]:2d}  库存 {stock[k]:2d}  '
-                  f'缺口 {best["short"][k]:2d}  冗余 {max(0, stock[k] - best["tot"][k]):2d}')
+            print(f'     {RES_LABEL[k]}: N=Σ_g n[g,r] {best["tot"][k]:2d}  S {stock[k]:2d}  '
+                  f'Gap=max(0,N−S) {best["short"][k]:2d}  冗余 {max(0, stock[k] - best["tot"][k]):2d}')
         print('   ---- 分组独立口径（计划 §4.4 的 Gap_kg：每组各自按库存配齐）----')
         print('     Σ_g Gap_kg = %d，Σ_g Red_kg = %d'
               % (sum(best['gap'].values()), sum(best['red'].values())))
@@ -355,6 +469,8 @@ def main():
 
     pd.DataFrame(rows).to_csv(os.path.join(OUT, 'q4_partition.csv'), index=False)
     pd.DataFrame(all_rows).to_csv(os.path.join(OUT, 'q4_all_partitions.csv'), index=False)
+    pd.DataFrame(alloc_rows).to_csv(os.path.join(OUT, 'q4_resource_allocation.csv'),
+                                    index=False)
 
     # 比较指标表
     cmp_rows = []
@@ -381,7 +497,8 @@ def main():
                   for i, u in enumerate(units)]
                  ).to_csv(os.path.join(OUT, 'q4_units.csv'), index=False)
     print('=' * 74)
-    print('已导出 q4_partition.csv / q4_comparison.csv / q4_units.csv / q4_all_partitions.csv')
+    print('已导出 q4_partition.csv / q4_comparison.csv / q4_units.csv / '
+          'q4_all_partitions.csv / q4_resource_allocation.csv')
 
 
 def _stirling(n, K):

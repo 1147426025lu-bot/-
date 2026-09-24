@@ -39,11 +39,17 @@ from scipy.optimize import milp, LinearConstraint, Bounds
 from scipy import sparse
 from core import (T_DEC, E_DEC, load_data, ll_to_xy, segment_geometry, segment_time,
                   relay_flight_time, relay_flight_energy, relay_hover_energy, charge_time)
-from q2 import precompute_geometry, recommended, resource_conflicts
+from q2 import precompute_geometry, recommended, resource_usage
+from solution_io import (build_q3_solution, save_solution, load_solution,
+                         inherit_trip_ids, check_foreign_keys, input_hashes,
+                         solver_hashes, Q2_SOLVER_FILES)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, '..', 'results')
 os.makedirs(OUT, exist_ok=True)
+
+Q2_SOL = os.path.join(OUT, 'q2_solution.json')
+Q3_SOL = os.path.join(OUT, 'q3_solution.json')
 
 DT_SEARCH = 2.0                       # 搜索阶段轨迹采样步长(s)
 DT_AUDIT = 1.0                        # 终检步长(s)：计划要求 1–2 s 覆盖全部轨迹点
@@ -492,17 +498,31 @@ def trip_slack(d, assignment):
 
 
 def shift_assignment(d, assignment, deltas):
-    """按 deltas 平移各架次开始时刻，同步平移交付时刻；机型/指派/能耗不变。"""
+    """
+    按 deltas 平移各架次开始时刻，同步平移交付时刻；机型/指派/能耗不变。
+
+    **一律返回新对象并复制可变成员**（route / boxes_at / deliver_abs）。旧版在
+    位移量为 0 时直接把原对象塞进结果里，于是「新排班」与 `base_asg` 共享同一批
+    嵌套字典——调用方一旦就地改其中一个字段（错峰、换站修复里都很自然），基线
+    就被悄悄改掉，后续所有以基线为参照的差值全部失真。
+    """
     out = []
     for a, dl in zip(assignment, deltas):
-        if abs(dl) < 1e-9:
-            out.append(a)
-            continue
         b = dict(a)
-        b['start'] = a['start'] + dl
+        b['route'] = list(a['route'])
+        b['boxes_at'] = {s: list(bs) for s, bs in a['boxes_at'].items()}
         b['deliver_abs'] = {k: v + dl for k, v in a['deliver_abs'].items()}
+        if abs(dl) >= 1e-9:
+            b['start'] = a['start'] + dl
         out.append(b)
     return out
+
+
+def asg_digest(assignment):
+    """排班的轻量摘要（开始时刻 / 时长 / 交付时刻），用于证明基线未被就地改动。"""
+    return tuple((round(a['start'], 9), round(a['duration'], 9),
+                  tuple(sorted((k, round(v, 9)) for k, v in a['deliver_abs'].items())))
+                 for a in assignment)
 
 
 def _apply_shift(intervals, assignment):
@@ -521,6 +541,29 @@ def _apply_shift(intervals, assignment):
         iv['assign'] = assignment[iv['trip']]
 
 
+def chain_conflicts(d, assignment):
+    """
+    同资源链上的占用冲突，逐条带出**释放时刻**与**所需推迟量**。
+
+    释放时刻必须按资源类型分别取，不能一律用 `start + duration`：
+      · 运输无人机 —— 返航即释放；
+      · 共享电池   —— 还要加上把返航 SOC 充回满电的充电时间（与 q2 的调度器
+                      同一口径：直接复用 resource_usage 的区间右端，不另算一份）。
+    旧版把两者的释放时刻都当成 `start + duration`，于是电池链上的冲突算出的
+    `required_delay` 偏小；更糟的是当冲突**只**来自电池时该值可能 ≤ 0，
+    cascade_shift 直接 `continue`，把「本来推得开」报成「推不动」。故这里把
+    资源编号、释放时刻、下一架次起点、所需推迟量一并给出，调用方不再猜类型。
+    """
+    bad = []
+    for key, ivs in resource_usage(d, assignment).items():
+        for x, y in zip(ivs, ivs[1:]):
+            if y[0] < x[1] - 1e-6:
+                bad.append(dict(resource=key, prev=x[2], nxt=y[2],
+                                resource_release=x[1], next_start=y[0],
+                                required_delay=x[1] - y[0]))
+    return bad
+
+
 def cascade_shift(d, base_asg, deltas, req, slack, max_iter=400):
     """
     把最小推迟量沿**资源链**传播后落定。
@@ -533,24 +576,31 @@ def cascade_shift(d, base_asg, deltas, req, slack, max_iter=400):
 
     返回 (deltas, assignment, 是否已无冲突)。
     """
+    base_digest = asg_digest(base_asg)
     deltas = list(deltas)
     for tr, need in req.items():
         deltas[tr] = min(deltas[tr] + need, max(deltas[tr], slack[tr]))
     asg = shift_assignment(d, base_asg, deltas)
     for _ in range(max_iter):
-        conf = resource_conflicts(d, asg)
+        conf = chain_conflicts(d, asg)
         if not conf:
+            assert asg_digest(base_asg) == base_digest, \
+                '基线排班在本轮传播中被就地改动，所有推迟量都不可信'
             return deltas, asg, True
         applied = False
-        for (_res, i, j) in conf:
-            need = (asg[i]['start'] + asg[i]['duration']) - asg[j]['start']
+        for c in conf:
+            j, need = c['nxt'], c['required_delay']
             if need <= 1e-9 or deltas[j] + need > slack[j] + 1e-9:
                 continue
             deltas[j] += need
             applied = True
         if not applied:
+            assert asg_digest(base_asg) == base_digest, \
+                '基线排班在本轮传播中被就地改动，所有推迟量都不可信'
             return deltas, asg, False
         asg = shift_assignment(d, base_asg, deltas)
+    assert asg_digest(base_asg) == base_digest, \
+        '基线排班在本轮传播中被就地改动，所有推迟量都不可信'
     return deltas, asg, False
 
 
@@ -844,7 +894,7 @@ def stagger(d, assignment, dead_of_trip, slack, verbose=False):
             trial = list(deltas)
             trial[k] = dl
             asg2 = shift_assignment(d, assignment, trial)
-            if resource_conflicts(d, asg2):
+            if chain_conflicts(d, asg2):
                 continue
             p2 = peak_of(asg2)
             if p2 < best_p - 1e-9:
@@ -894,7 +944,11 @@ def schedule_relays(d, jobs, cands, verbose=False):
     的架次一起顶迟到。
     """
     rt = d.relay_type
-    relays = [dict(id='R01', free_at=0.0), dict(id='R02', free_at=0.0)]
+    # 中继机清单从数据读（`d.relay_uavs`），不写死 ['R01','R02']：数据一旦增减
+    # 机数，写死的版本会静默按 2 架排班，而报出的机队规模仍是数据里那个数。
+    if not d.relay_uavs:
+        raise RuntimeError('数据中继无人机清单为空，无法排班')
+    relays = [dict(id=u['id'], free_at=0.0) for u in d.relay_uavs]
     comps = [dict(id=f'RC{k+1}', ready_at=0.0) for k in range(d.relay_batteries[0])]
     out_flight = {}
     for ci in {j['ci'] for j in jobs}:
@@ -973,14 +1027,27 @@ def audit(d, assignment, relays, cands, dt=DT_AUDIT, verbose=False):
                 gaps.append(dict(trip=ai, t=tt, lon=lon, lat=lat, alt=alt))
         for s in states:
             tot[{'直连': 'direct', '中继': 'relay', '中断': 'gap'}[s[0]]] += s[3]
+        # 共同边界序列 b_0 ≤ … ≤ b_n：内部边界取相邻采样时刻的中点，b_0=t_0、
+        # b_n=t_{n-1}。于是采样点 k 独占的区间 [b_k, b_{k+1}] 的长度恰为
+        # time_weights 给出的 w_k，分段表与上面报出的时间占比用的是**同一套**
+        # 时间测度。旧写法用 pts[j-1][0] 收尾、下一段从 pts[j][0] 起，每处边界都
+        # 漏掉一个采样步长 Δt（漏多少还随 dt 变），「相邻边界相等」无从谈起。
+        ts = [p[0] for p in pts]
+        nb = len(ts)
+        b = [ts[0]] + [(ts[k - 1] + ts[k]) / 2.0 for k in range(1, nb)] + [ts[-1]]
         i = 0
-        while i < len(states):
+        while i < nb:
             j = i
-            while j < len(states) and states[j][:3] == states[i][:3]:
+            while j < nb and states[j][:3] == states[i][:3]:
                 j += 1
-            segs.append(dict(trip=ai, phase=states[i][0], t1=pts[i][0], t2=pts[j - 1][0],
-                             mode=states[i][1], rid=states[i][2]))
+            segs.append(dict(trip=ai, phase=states[i][0], mode=states[i][1],
+                             rid=states[i][2], t1=b[i], t2=b[j],
+                             w=sum(w[i:j]), n_pts=j - i,
+                             total=ts[-1] - ts[0]))
             i = j
+    errs = check_phase_table(segs)
+    if errs:
+        raise AssertionError('通信分段表不自洽：' + '；'.join(errs[:3]))
     T = sum(tot.values())
     frac = {k: (v / T if T > 0 else 0.0) for k, v in tot.items()}
     frac['total_time'] = T
@@ -996,6 +1063,40 @@ def audit(d, assignment, relays, cands, dt=DT_AUDIT, verbose=False):
 # ===========================================================================
 # 10. 序贯对照（不做通信协同的运输调度 / 无中继）
 # ===========================================================================
+def check_phase_table(segs, tol=1e-9):
+    """
+    通信分段表自洽性，**与采样步长无关**：只查表里写出的边界本身。
+
+      ① 相邻边界相等：同一架次内后一段的起点必须逐位等于前一段的终点；
+      ② 无空洞、无重叠：由 ① 直接保证，此处显式复算一遍差值；
+      ③ 覆盖完整：同一架次所有段长之和 == 该架次轨迹总时长（time_weights 的口径）；
+      ④ 段常性：每段内不得出现两种不同的通信阶段（阶段必须真的成段）。
+
+    返回错误清单，空列表表示通过。旧版按「上一段收尾于 pts[j-1]、下一段起于
+    pts[j]」写表，每处边界都差一个 Δt，把 dt 从 2 s 改到 1 s 表的数值就跟着变，
+    这条校验根本立不住；现在边界由共同序列生成，校验与 dt 解耦。
+    """
+    errs = []
+    by_trip = {}
+    for s in segs:
+        by_trip.setdefault(s['trip'], []).append(s)
+    for tr, ss in sorted(by_trip.items()):
+        ss.sort(key=lambda x: x['t1'])
+        for x, y in zip(ss, ss[1:]):
+            if abs(y['t1'] - x['t2']) > tol:
+                errs.append('T%02d 分段边界不相等：%s 止于 %.9f，%s 起于 %.9f'
+                            % (tr + 1, x['phase'], x['t2'], y['phase'], y['t1']))
+        tot_seg = sum(x['t2'] - x['t1'] for x in ss)
+        tot_ref = ss[0].get('total', None)
+        if tot_ref is not None and abs(tot_seg - tot_ref) > 1e-6:
+            errs.append('T%02d 分段总长 %.9f 与轨迹时长 %.9f 不符'
+                        % (tr + 1, tot_seg, tot_ref))
+        for x in ss:
+            if x['t2'] < x['t1'] - tol:
+                errs.append('T%02d 出现负长分段：%.9f → %.9f' % (tr + 1, x['t1'], x['t2']))
+    return errs
+
+
 def sequential_baseline(d, assignment, dt=DT_AUDIT):
     """
     对照实验：**完全不做通信协同**的运输调度下，直连能撑住多少。
@@ -1152,10 +1253,14 @@ def solve_relay(d, assignment, greedy=False, single_hover=False, verbose=True):
     if over_E or over_H:
         raise RuntimeError('中继架次越限：能耗 %d 个、悬停高度 %d 个' % (len(over_E), len(over_H)))
 
+    # ok=True 的含义仅限于「选站可行、中继架次不越限、排班已给出」。它**不是**
+    # 交付侧的可行证书：硬时限是否满足、加权迟到多少、能耗合计几何，都要由调用方
+    # 在最终错峰方案上重算（见 main 里的 F05 汇总）。把它们当成 ok 的推论会漏检。
     return dict(ok=True, intervals=intervals, cands=cands, sel=sel, relays=relays,
                 skipped=skipped, assignment=assignment, deltas=deltas,
                 peak0=peak0, peak1=peak1, uncovered=uncovered, cover=cover,
-                repair_rounds=repair_rounds, secs=_time.time() - t0)
+                repair_rounds=repair_rounds, secs=_time.time() - t0,
+                certificate='选站/排班可行，不含交付侧指标')
 
 
 def uncovered_note(uncovered):
@@ -1171,9 +1276,17 @@ def main():
 
     # 复用问题二推荐方案（q2.py 实跑后落盘于 results/q2_recommended.json）
     trips, assignment, q2_m, q2_order = recommended(d)
+    # 上游**完整方案**：数据/代码哈希必须与落盘时一致，否则这份上游已过期
+    q2_sol = load_solution(Q2_SOL, stage='q2',
+                           input_hashes_expect=input_hashes(),
+                           solver_hashes_expect=solver_hashes(Q2_SOLVER_FILES))
     assignment = sorted(assignment, key=lambda x: x['start'])
     assignment = [dict(a, trip_idx=i) for i, a in enumerate(assignment)]
+    # 架次编号**继承**上游方案，并逐架次核对指派未被重解改写
+    trip_ids = inherit_trip_ids(assignment, q2_sol)
     base_starts = [a['start'] for a in assignment]
+    print(f'上游方案 {q2_sol["solution_id"]}（{len(trip_ids)} 架次，'
+          f'{trip_ids[0]}..{trip_ids[-1]}）')
     print('=' * 74)
     print(f'运输调度（问题二推荐方案）: {q2_m["n_trips"]} 架次 / {q2_m["total_E"]:.3f} kWh / '
           f'makespan {q2_m["makespan"]:.0f} s / 硬违反 {q2_m["hard_viol"]}')
@@ -1208,7 +1321,8 @@ def main():
         print(f'  未保障失效区间 {len(res["uncovered"])} 个；弃飞中继架次 {len(res["skipped"])} 个。')
         print('  以下如实记录，不得在报告中假称零中断：')
         for g in gaps[:10]:
-            print(f'    T{g["trip"]+1:02d} t={g["t"]:.0f}s ({g["lon"]:.5f},{g["lat"]:.5f}) 海拔{g["alt"]:.0f}m')
+            print(f'    {trip_ids[g["trip"]]} t={g["t"]:.0f}s '
+                  f'({g["lon"]:.5f},{g["lat"]:.5f}) 海拔{g["alt"]:.0f}m')
         print('!' * 74)
 
     # ---- 导出 ----
@@ -1225,51 +1339,180 @@ def main():
                             地面高程m=round(x['ground_elev'], 2), 保障失效区间数=n_iv))
     pd.DataFrame(st_rows).to_csv(os.path.join(OUT, 'q3_stations.csv'), index=False)
 
-    rows = []
-    for i, x in enumerate(res['relays']):
-        rows.append(dict(
-            中继架次编号=f'R{i+1:02d}', 中继无人机编号=x['relay'], 能源组件编号=x['comp'],
-            开始时刻s=round(x['start'], T_DEC), 悬停经度=round(x['lon'], 6),
-            悬停纬度=round(x['lat'], 6),
+    # ---- 完整最终方案落盘（先落盘，再由它派生全部 CSV：编号只有一个来源）----
+    joint_done = max([x['return_t'] for x in res['relays']]
+                     + [a['start'] + a['duration'] for a in assignment])
+    # ---- F05：由**最终错峰方案**重算的一组交付侧指标 -------------------------
+    # 旧版只打印联合完工时刻，其余（加权迟到、迟到箱数、最长迟到、最小硬时限
+    # 余量）全靠调用方自己再算一遍，`solve_relay` 的 ok=True 也被当成完整可行的
+    # 证书——实际它只保证「覆盖可行 + 零中断」，不含硬时限。这里一次性算清并落盘。
+    #
+    # 数据源是**错峰后的 assignment 本身**（不是 q3_sol）：q3_sol 在下面才由
+    # build_q3_solution 造出来，此处引用它只会拿到一个未绑定的名字。两者同源——
+    # build_q3_solution 的 transport_trips 正是逐字段抄自这个 assignment。
+    idx_box = {b['id']: b for bs in d.boxes_by_service.values() for b in bs}
+    w_tard, n_late, max_late = 0.0, 0, 0.0
+    min_margin = float('inf')
+    min_margin_box = ''
+    for t in assignment:
+        for _sid, boxes in t['boxes_at'].items():
+            for bx in boxes:
+                bid = bx['id']
+                b = idx_box[bid]
+                t_del = t['deliver_abs'][bid]
+                if b['expect'] is not None:
+                    late = max(0.0, t_del - b['expect'])
+                    if late > 1e-6:
+                        n_late += 1
+                        max_late = max(max_late, late)
+                    w_tard += b['priority'] * late
+                lim = []
+                if b['category'] == '医疗物资' and b['expect'] is not None:
+                    lim.append(b['expect'])
+                if b['first_batch'] and b['deadline'] is not None:
+                    lim.append(b['deadline'])
+                if lim:
+                    mg = min(lim) - t_del
+                    if mg < min_margin:
+                        min_margin, min_margin_box = mg, bid
+    relay_done = max([x['return_t'] for x in res['relays']], default=0.0)
+    trans_done = max(a['start'] + a['duration'] for a in assignment)
+    q3_m = dict(direct=frac['direct'], relay=frac['relay'], gap=frac['gap'],
+                total_time=frac['total_time'],
+                n_relays=len(res['relays']), n_stations=len(stations),
+                relay_energy_kwh=sum(x['E'] for x in res['relays']),
+                skipped=len(res['skipped']), uncovered=len(res['uncovered']),
+                joint_done=joint_done,
+                makespan=trans_done,
+                transport_energy_kwh=sum(a['E'] for a in assignment),
+                weight_tardiness=w_tard, n_late_boxes=n_late, max_late_s=max_late,
+                min_hard_margin_s=(0.0 if min_margin == float('inf') else min_margin),
+                min_hard_margin_box=min_margin_box,
+                transport_done_s=trans_done, relay_done_s=relay_done,
+                joint_energy_kwh=(sum(a['E'] for a in assignment)
+                                  + sum(x['E'] for x in res['relays'])),
+                n_staggered=sum(1 for x in res['deltas'] if x > 0),
+                total_delay_s=sum(res['deltas']))
+    if q3_m['min_hard_margin_s'] < -1e-6:
+        raise AssertionError('最终方案存在硬时限违反：最小余量 %.6f s（%s）'
+                             % (q3_m['min_hard_margin_s'], min_margin_box))
+    q3_sol = build_q3_solution(d, q2_sol, assignment, res['relays'], res['intervals'],
+                               st_no, q3_m, seed=0,
+                               budget=dict(dt_search=DT_SEARCH, dt_audit=DT_AUDIT,
+                                           margin_db=MARGIN_DB))
+    # 外键校验：每条失效区间都必须解析到本方案内的运输架次与中继架次；空引用显式失败
+    check_foreign_keys(q3_sol, q3_sol['intervals'], require_relay_binding=True)
+    q3_id = save_solution(Q3_SOL, q3_sol)
+    print(f'已落盘完整方案 {os.path.basename(Q3_SOL)}（solution_id={q3_id}，'
+          f'来源 {q2_sol["solution_id"]}）')
+
+    relay_recs = q3_sol['relay_trips']
+    rid_by_index = {i: r['relay_trip_id'] for i, r in enumerate(relay_recs)}
+    relay_xy = {x['station']: x for x in res['relays']}
+
+    rt_rows = []
+    for r in relay_recs:
+        x = next(y for y in res['relays'] if st_no.get(y['station'], '') == r['station_id']
+                 and abs(y['start'] - r['start']) <= 1e-9)
+        rt_rows.append(dict(
+            中继架次编号=r['relay_trip_id'], 中继无人机编号=r['relay_uav_id'],
+            能源组件编号=r['component_id'], 悬停站编号=r['station_id'],
+            开始时刻s=round(r['start'], T_DEC),
+            悬停经度=round(x['lon'], 6), 悬停纬度=round(x['lat'], 6),
             # 海拔留 3 位：悬停离地高度按上限取值时，只留 1 位会把 813.1891 舍成
             # 813.2，用表里数值回算离地高度就成了 300.011 m，看上去像越限。
-            悬停海拔m=round(x['alt_abs'], 3), 建链完成时刻s=round(x['link_done'], T_DEC),
-            服务结束时刻s=round(x['service_end'], T_DEC), 返回O01时刻s=round(x['return_t'], T_DEC),
-            架次能耗kWh=round(x['E'], E_DEC)))
-    pd.DataFrame(rows).to_csv(os.path.join(OUT, 'q3_relay_trips.csv'), index=False)
-    # 悬停站编号回填到中继架次表（问题四按站归组用；verify.py 按列名读，追加列安全）
-    rt_df = pd.read_csv(os.path.join(OUT, 'q3_relay_trips.csv'), encoding='utf-8-sig')
-    rt_df['悬停站编号'] = [st_no.get(x['station'], '') for x in res['relays']]
-    rt_df.to_csv(os.path.join(OUT, 'q3_relay_trips.csv'), index=False)
+            悬停海拔m=round(x['alt_abs'], 3), 建链完成时刻s=round(r['link_done'], T_DEC),
+            服务结束时刻s=round(r['service_end'], T_DEC),
+            返回O01时刻s=round(r['return_time'], T_DEC),
+            架次能耗kWh=round(r['energy_kwh'], E_DEC)))
+    pd.DataFrame(rt_rows).to_csv(os.path.join(OUT, 'q3_relay_trips.csv'), index=False)
 
+    # 通信分段表：编号一律取自方案，不按 `s['trip']+1` 现推。段边界是共同边界
+    # 序列（同一架次内后段起点 == 前段终点），时长与终检的时间权重同源。
     comm_rows = []
     for s in segs:
-        comm_rows.append(dict(运输架次编号=f'T{s["trip"]+1:02d}', 通信阶段=s['phase'],
+        comm_rows.append(dict(运输架次编号=trip_ids[s['trip']], 通信阶段=s['phase'],
                               开始时刻s=round(s['t1'], T_DEC), 结束时刻s=round(s['t2'], T_DEC),
+                              段时长s=round(s['t2'] - s['t1'], T_DEC),
+                              采样点数=s['n_pts'],
                               保障方式=s['mode'], 中继架次编号=s['rid']))
     pd.DataFrame(comm_rows).to_csv(os.path.join(OUT, 'q3_comm_phases.csv'), index=False)
     if comm_rows:
         nobind = sum(1 for r in comm_rows if r['保障方式'] == '中继' and not r['中继架次编号'])
         assert nobind == 0, f'{nobind} 段中继没有绑定具体中继架次编号'
+    ph_errs = check_phase_table(segs)
+    if ph_errs:
+        raise AssertionError('通信分段表不自洽：' + '；'.join(ph_errs[:3]))
+
+    # 交付侧汇总表（F05）：一行一指标，均由最终方案重算，供论文与 Excel 直接取用
+    m_rows = [
+        ('直连时间占比', frac['direct'], '—'), ('中继时间占比', frac['relay'], '—'),
+        ('中断时间占比', frac['gap'], '—'), ('轨迹总时长', frac['total_time'], 's'),
+        ('运输完工时刻', q3_m['transport_done_s'], 's'),
+        ('中继最晚返回时刻', q3_m['relay_done_s'], 's'),
+        ('联合完工时刻', q3_m['joint_done'], 's'),
+        ('运输能耗', q3_m['transport_energy_kwh'], 'kWh'),
+        ('中继能耗', q3_m['relay_energy_kwh'], 'kWh'),
+        ('合计能耗', q3_m['joint_energy_kwh'], 'kWh'),
+        ('加权迟到', q3_m['weight_tardiness'], '权重·s'),
+        ('迟到箱数', q3_m['n_late_boxes'], '个'),
+        ('最长迟到', q3_m['max_late_s'], 's'),
+        ('最小硬时限余量', q3_m['min_hard_margin_s'], 's'),
+        ('错峰推迟架次数', q3_m['n_staggered'], '个'),
+        ('累计推迟量', q3_m['total_delay_s'], 's'),
+        ('中继架次', q3_m['n_relays'], '个'), ('悬停站', q3_m['n_stations'], '个'),
+        ('弃飞中继架次', q3_m['skipped'], '个'), ('未保障失效区间', q3_m['uncovered'], '个'),
+    ]
+    pd.DataFrame([dict(指标=k, 数值=round(float(v), 6), 单位=u) for k, v, u in m_rows]
+                 ).to_csv(os.path.join(OUT, 'q3_metrics.csv'), index=False)
 
     # 失效区间级映射表：运输架次 ↔ 通信失效区间 ↔ 具体中继架次 ↔ 悬停站。
     # 问题四直接读这张表，不再自己重跑一遍中继选站——消除双份真相源。
-    iv_relay, iv_station = {}, {}
-    for i, x in enumerate(res['relays']):
-        for j in x['ivs']:
-            iv_relay[j] = f'R{i+1:02d}'
-            iv_station[j] = st_no[x['station']]
     iv_rows = []
-    for j, iv in enumerate(res['intervals']):
-        iv_rows.append(dict(失效区间编号=f'G{j+1:02d}', 运输架次编号=f'T{iv["trip"]+1:02d}',
-                            区间起点s=round(iv['t_start'], T_DEC),
-                            区间终点s=round(iv['t_end'], T_DEC),
-                            悬停站编号=iv_station.get(j, ''),
-                            中继架次编号=iv_relay.get(j, '')))
+    for rec in q3_sol['intervals']:
+        iv_rows.append(dict(失效区间编号=rec['interval_id'], 运输架次编号=rec['trip_id'],
+                            区间起点s=round(rec['start'], T_DEC),
+                            区间终点s=round(rec['end'], T_DEC),
+                            悬停站编号=next((r['station_id'] for r in relay_recs
+                                         if r['relay_trip_id'] == rec['relay_trip_id']), ''),
+                            中继架次编号=rec['relay_trip_id']))
     pd.DataFrame(iv_rows).to_csv(os.path.join(OUT, 'q3_intervals.csv'), index=False)
-    n_unbound = sum(1 for r in iv_rows if not r['中继架次编号'])
-    if n_unbound:
-        print(f'  ⚠ {n_unbound} 个失效区间没有绑定中继架次（即未保障）')
+
+    # 最终运输方案（错峰后）：编号来自方案；机型/实体/电池/逐箱交付一并落盘，
+    # 问题四只读这张表与外键表，不再调用问题二的调度器
+    tt_rows, bd_rows = [], []
+    for t in q3_sol['transport_trips']:
+        tt_rows.append(dict(
+            架次编号=t['trip_id'], 无人机编号=t['uav'], 机型编号=t['type'],
+            电池编号=t['battery'], 原开始时刻s=round(t['base_start'], T_DEC),
+            开始时刻s=round(t['start'], T_DEC), 返回O01时刻s=round(t['return_time'], T_DEC),
+            访问服务区顺序='->'.join(t['route']), 架次能耗kWh=round(t['energy_kwh'], E_DEC),
+            服务区数=len(t['box_ids_by_service']),
+            货箱数=sum(len(v) for v in t['box_ids_by_service'].values())))
+        for sid, bids in sorted(t['box_ids_by_service'].items()):
+            for bid in bids:
+                b = idx_box[bid]
+                t_del = t['deliver_abs'][bid]
+                lim = []
+                if b['category'] == '医疗物资' and b['expect'] is not None:
+                    lim.append(b['expect'])
+                if b['first_batch'] and b['deadline'] is not None:
+                    lim.append(b['deadline'])
+                bd_rows.append(dict(
+                    货箱编号=bid, 架次编号=t['trip_id'], 服务区编号=sid,
+                    类别=b['category'], 优先系数=b['priority'],
+                    是否首批=('是' if b['first_batch'] else '否'),
+                    期望送达时刻s=(None if b['expect'] is None else round(b['expect'], T_DEC)),
+                    硬时限时刻s=(None if not lim else round(min(lim), T_DEC)),
+                    交付完成时刻s=round(t_del, T_DEC),
+                    硬时限余量s=(None if not lim else round(min(lim) - t_del, T_DEC)),
+                    是否迟到=('是' if (b['expect'] is not None
+                                   and t_del > b['expect'] + 1e-6) else '否')))
+    pd.DataFrame(tt_rows).to_csv(os.path.join(OUT, 'q3_transport_trips.csv'), index=False)
+    pd.DataFrame(bd_rows).to_csv(os.path.join(OUT, 'q3_box_delivery.csv'), index=False)
+    if len(bd_rows) != sum(len(v) for t in q3_sol['transport_trips']
+                           for v in t['box_ids_by_service'].values()):
+        raise AssertionError('逐箱交付表行数与方案不符')
 
     # 覆盖率汇总（时间占比口径）
     cov_rows = [dict(口径='联合优化', 采样步长s=DT_AUDIT,
@@ -1291,7 +1534,7 @@ def main():
                      中继架次=0, 悬停站=0, 中继能耗kWh=0.0)]
     pd.DataFrame(cov_rows).to_csv(os.path.join(OUT, 'q3_coverage.csv'), index=False)
 
-    sg = [dict(架次编号=f'T{i+1:02d}', 原开始时刻s=round(base_starts[i], T_DEC),
+    sg = [dict(架次编号=trip_ids[i], 原开始时刻s=round(base_starts[i], T_DEC),
                错峰开始时刻s=round(assignment[i]['start'], T_DEC),
                推迟s=round(res['deltas'][i], T_DEC))
           for i in range(len(assignment))]
@@ -1301,9 +1544,23 @@ def main():
     print(f'悬停站 {len(stations)} 个；中继架次 {len(res["relays"])} 个；'
           f'中继总能耗 {sum(x["E"] for x in res["relays"]):.3f} kWh；'
           f'弃飞 {len(res["skipped"])} 个')
-    print(f'联合任务完成时刻: {max([x["return_t"] for x in res["relays"]] + [a["start"] + a["duration"] for a in assignment]):.0f} s')
-    print(f'已导出 q3_relay_trips.csv / q3_comm_phases.csv / q3_stations.csv / '
-          f'q3_coverage.csv（用时 {res["secs"]:.1f} s）')
+    print(f'交付侧：加权迟到 {q3_m["weight_tardiness"]:.1f} 权重·s'
+          f'（迟到箱 {q3_m["n_late_boxes"]} 个，最长 {q3_m["max_late_s"]:.0f} s）；'
+          f'最小硬时限余量 {q3_m["min_hard_margin_s"]:.0f} s'
+          f'（{q3_m["min_hard_margin_box"]}）')
+    print(f'能耗：运输 {q3_m["transport_energy_kwh"]:.3f} + 中继 '
+          f'{q3_m["relay_energy_kwh"]:.3f} = 合计 {q3_m["joint_energy_kwh"]:.3f} kWh')
+    print(f'// 运输完工 {q3_m["transport_done_s"]:.0f} s | '
+          f'中继最晚返回 {q3_m["relay_done_s"]:.0f} s | '
+          f'联合完工 {q3_m["joint_done"]:.0f} s')
+    print(f'// 通信分段表：{len(comm_rows)} 段，共同边界校验通过'
+          f'（相邻边界逐位相等、无空洞、段时长与时间权重同源）')
+    print(f'// 资源链冲突按类型取释放时刻（电池含充电），'
+          f'错峰推迟 {q3_m["n_staggered"]} 个架次、累计 {q3_m["total_delay_s"]:.0f} s')
+    print(f'已导出 q3_solution.json / q3_transport_trips.csv / q3_box_delivery.csv / '
+          f'q3_relay_trips.csv / q3_intervals.csv / q3_comm_phases.csv / q3_stations.csv / '
+          f'q3_coverage.csv / q3_metrics.csv / q3_stagger.csv '
+          f'（用时 {res["secs"]:.1f} s）')
     if gaps:
         # 结果表已落盘供诊断，但进程以非零码退出：零中断是本问的硬约束，
         # 未达成时绝不能让流水线当作成功继续往下走。
