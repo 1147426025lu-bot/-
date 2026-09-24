@@ -460,7 +460,11 @@ Just choose `xelatex', no `pdflatex' or `latex' and so on.}
 }
 
 \RequirePackage{titletoc}
-\RequirePackage[title,titletoc]{appendix}
+% 只取 title 选项：titletoc 选项会把附录条目写成「附录 \numberline{A}标题」，
+% 而 titletoc 的 \thecontentslabel 一律前置编号，页面上就成了「A 附录求解代码清单」——
+% 与正文标题「附录A 求解代码清单」不一致。不加该选项时走 LaTeX 标准写法
+% \numberline{附录A}，目录与正文标题逐字相同。
+\RequirePackage[title]{appendix}
 
 \newcommand*{\gmcm@cap@appendixname}{附录}
 \renewcommand*\appendixname{\gmcm@cap@appendixname}
@@ -475,9 +479,16 @@ Just choose `xelatex', no `pdflatex' or `latex' and so on.}
 }
 
 %%设置目录格式
+% 附录条目在目录里要带「附录」二字：appendix 宏包写进 .toc 的编号只有字母
+% （\numberline{A}），而正文标题是「附录A」。在 appendices 环境开头往 .toc 写一个
+% 开关，其后（且仅其后）的章条目自动补上附录名，保证目录与正文标题逐字一致。
+\newif\ifgmcm@toc@app
+% 写进 .toc 的宏名不能带 @：.toc 是在正文里回读的，那时 @ 不是字母，
+% \gmcm@toc@appendix 会被切成 \gmcm + 「@toc@appendix」，报 Undefined control sequence。
+\newcommand{\gmcmtocappendix}{\gmcm@toc@apptrue}
 % 节的目录格式
 \titlecontents{section}[0pt]{\vspace{2mm}\heiti}
-{\thecontentslabel\hskip.5em}{}{\titlerule*[0.5pc]{.}\contentspage}
+{\ifgmcm@toc@app\appendixname\fi\thecontentslabel\hskip.5em}{}{\titlerule*[0.5pc]{.}\contentspage}
 % 小节的目录格式
 \titlecontents{subsection}[30pt]{\songti}
 {\thecontentslabel\hskip.5em}{}{\titlerule*[0.5pc]{.}\contentspage}

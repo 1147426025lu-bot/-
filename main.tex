@@ -29,6 +29,12 @@
 % 改由 \CJKmainfont（本机即 SimSun）出字，正文的「配置 ④ ⊇ ③」才不会缺字。
 \xeCJKDeclareCharClass{CJK}{"2460 -> "24FF}
 
+% === 目录 ===
+% 版式（黑体章条、宋体节条、点线引导、章前 7pt 间距）由 cls 的 tocloft/titletoc 设定，
+% 这里只定层级与标题字样：列到「节」为止，标题用「目 录」与摘要页的「摘 要：」呼应。
+\setcounter{tocdepth}{2}
+\renewcommand{\contentsname}{目\quad 录}
+
 % === 结果数字的统一来源（由 code/paper_metrics.py 生成，勿手改）===
 % 该文件把每个结果数字定义成宏（\mtQoneEnergy 等），数值与出处见
 % results/paper_metrics.json。正文用到这些数的地方一律写宏，脚本重跑一次即同步。
@@ -55,6 +61,12 @@
 	\keywords{无人机应急运输；通信中继；地形净空；大邻域自适应搜索；集合覆盖；任务分区；资源缺口}
 \end{abstract}
 
+% === 目录（摘要在前、正文在后；abstract 环境自带 \clearpage，故目录起新页）===
+% article 系的 \tableofcontents 不像 report 那样自带 \clearpage，
+% 后面必须自己清页，否则正文第一章会接在目录最后一行下面。
+\maketoc
+\clearpage
+
 \pagestyle{plain}
 
 % === 正文 ===
@@ -76,6 +88,8 @@
 % === 附录 ===
 \clearpage
 \begin{appendices}
+% 往 .toc 写开关：其后的章条目在目录里补上「附录」二字（见 cls 的 \gmcm@toc@appendix）
+\addtocontents{toc}{\protect\gmcmtocappendix}
 % 附录内图表公式沿用字母编号（附录 A 内为 A.1），与正文的数字编号相区分
 \setcounter{table}{0}\setcounter{figure}{0}\setcounter{equation}{0}
 \renewcommand{\thetable}{\Alph{section}.\arabic{table}}

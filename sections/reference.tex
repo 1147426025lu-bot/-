@@ -1,6 +1,7 @@
 \newpage
-\phantomsection
-\addcontentsline{toc}{section}{参考文献}
+% 目录条目由 cls 的 \AtBeginEnvironment{thebibliography} 钩子统一登记
+% （\phantomsection + \addcontentsline{toc}{section}{\refname}），此处不再重复登记，
+% 否则目录里会出现两行「参考文献」。
 
 % 按正文首次引用次序编号。著录格式依竞赛论文格式规范：
 %   书籍      [编号] 作者，书名，出版地：出版社，起止页码，出版年。
