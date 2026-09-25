@@ -124,14 +124,41 @@ def collect():
     scan = _csv('q2_scan.csv')
     put('QtwoScanRows', len(scan), 'q2_scan.csv 行数', nd=0)
     dom = _csv('q2_pareto.csv')
-    put('QtwoParetoRows', len(dom), 'q2_pareto.csv 行数', nd=0)
-    # 推荐档：扫描表里实际架次数最少、能耗最低的那一档（与求解脚本同序）
-    rec = dom.sort_values(['实际架次', '能耗kWh']).iloc[0]
-    put('QtwoRecK', int(rec['K上限']), 'q2_pareto.csv K上限（推荐档）', nd=0)
-    put('QtwoRecTrips', int(rec['实际架次']), 'q2_pareto.csv 实际架次（推荐档）', nd=0)
-    put('QtwoRecEnergy', float(rec['能耗kWh']), 'q2_pareto.csv 能耗kWh（推荐档）')
+    # 这个宏叫「非支配前沿档数」，就必须数**非支配=是**的行，不能数文件行数。
+    # q2_pareto.csv 是「全部扫描档 + 一列非支配标记」，行数 = 档数（6），而真正的
+    # 前沿档是 5：K<=30 一档被 K<=35 严格占优（同为 29 架次，能耗/完成时间/加权时延
+    # 三项同时更差），标了「否」。用 len(dom) 会让宏值 6 与 §6 正文「其余五档互不
+    # 支配，共同构成四维非支配前沿」当场矛盾——两处都在同一篇论文里，评审一对就露。
+    # 现在这两个宏没被正文引用，所以矛盾还没显形；正因为没显形才更要改，否则哪天
+    # 有人写了「\mtQtwoParetoRows 档构成前沿」，错值会直接印进 PDF 而不报错。
+    n_dom = int((dom['非支配'].astype(str).str.strip() == '是').sum())
+    put('QtwoParetoRows', n_dom, 'q2_pareto.csv 中「非支配=是」的行数', nd=0)
+    # 推荐档必须**由落盘方案的标识定**，不能在这里另按「架次、能耗排序第一行」重挑一遍。
+    # 按排序重挑在旧口径下恰好与落盘方案重合（都是 K<=20），所以看不出问题；但选择键
+    # 已改为题目优先级字典序（时延 → 完工 → 能耗 → 架次），选中的不再是最少架次那一档，
+    # 排序重挑就会指向**另一个方案**——论文里的「推荐档能耗/完工/架次」会与
+    # q2_solution.json 的实际推荐互相矛盾，而且不报错。
+    # 改为按落盘方案的 (实际架次, 能耗) 在扫描表里定位它自己那一行；定位不到即说明
+    # 论文要写的推荐方案不在扫描表里，这是必须炸出来的错误，不能退回排序。
+    _n, _e = float(sol2['metrics']['n_trips']), float(sol2['metrics']['total_E'])
+    _hit = dom[(dom['实际架次'].astype(float) == _n)
+               & ((dom['能耗kWh'].astype(float) - _e).abs() < 1e-6)]
+    if len(_hit) != 1:
+        raise ValueError(
+            'q2_solution.json 的推荐方案（架次=%g、能耗=%.6f kWh）在 q2_pareto.csv 中'
+            '匹配到 %d 行，应为 1 行；论文推荐档必须能追溯到落盘方案本身'
+            % (_n, _e, len(_hit)))
+    rec = _hit.iloc[0]
+    # 溯源串一律写「落盘推荐方案所在档」而非「推荐档」：前者说的是**这个值是那一行
+    # 的字面拷贝**（因而与 q2_solution.json 同源、永不背离），后者听起来像「本脚本
+    # 自己评出的推荐档」——一旦有人拿它当作独立判断，就会在下一次改选择键时再次分叉。
+    put('QtwoRecK', int(rec['K上限']), 'q2_pareto.csv K上限（落盘推荐方案所在档）', nd=0)
+    put('QtwoRecTrips', int(rec['实际架次']),
+        'q2_pareto.csv 实际架次（落盘推荐方案所在档）', nd=0)
+    put('QtwoRecEnergy', float(rec['能耗kWh']),
+        'q2_pareto.csv 能耗kWh（落盘推荐方案所在档）')
     put('QtwoRecMakespan', float(rec['makespan_s']),
-        'q2_pareto.csv makespan_s（推荐档）', nd=D_T)
+        'q2_pareto.csv makespan_s（落盘推荐方案所在档）', nd=D_T)
     ex = _csv('q2_exact.csv')
     put('QtwoExactCases', len(ex), 'q2_exact.csv 行数', nd=0)
     # 层 A 的行没有捕获求解器状态，该列留空；空值按 0 计，不得让 NaN 混进计数。

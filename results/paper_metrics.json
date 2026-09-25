@@ -55,7 +55,7 @@
   "source": "q1_ilp_gap.csv 行数"
  },
  "QtwoTrips": {
-  "value": "20",
+  "value": "24",
   "meaning": "问题二 运输架次数",
   "source": "q2_transport_trips.csv 行数"
  },
@@ -65,12 +65,12 @@
   "source": "q2_solution.json uav_ids"
  },
  "QtwoEnergy": {
-  "value": "68.713",
+  "value": "69.316",
   "meaning": "问题二 总能耗 kWh",
   "source": "q2_transport_trips.csv 架次能耗kWh 求和"
  },
  "QtwoMakespan": {
-  "value": "8732.6",
+  "value": "6506.1",
   "meaning": "问题二 完工时刻 s",
   "source": "q2_transport_trips.csv 返回O01时刻s 最大值"
  },
@@ -95,34 +95,34 @@
   "source": "q2_solution.json seed"
  },
  "QtwoScanRows": {
-  "value": "6",
+  "value": "4",
   "meaning": "ε-约束扫描档数",
   "source": "q2_scan.csv 行数"
  },
  "QtwoParetoRows": {
-  "value": "6",
+  "value": "3",
   "meaning": "非支配前沿档数",
-  "source": "q2_pareto.csv 行数"
+  "source": "q2_pareto.csv 中「非支配=是」的行数"
  },
  "QtwoRecK": {
-  "value": "20",
+  "value": "25",
   "meaning": "推荐档 K 上限",
-  "source": "q2_pareto.csv K上限（推荐档）"
+  "source": "q2_pareto.csv K上限（落盘推荐方案所在档）"
  },
  "QtwoRecTrips": {
-  "value": "20",
+  "value": "24",
   "meaning": "推荐档实际架次",
-  "source": "q2_pareto.csv 实际架次（推荐档）"
+  "source": "q2_pareto.csv 实际架次（落盘推荐方案所在档）"
  },
  "QtwoRecEnergy": {
-  "value": "68.713",
+  "value": "69.316",
   "meaning": "推荐档能耗 kWh",
-  "source": "q2_pareto.csv 能耗kWh（推荐档）"
+  "source": "q2_pareto.csv 能耗kWh（落盘推荐方案所在档）"
  },
  "QtwoRecMakespan": {
-  "value": "8732.6",
+  "value": "6506.1",
   "meaning": "推荐档完工时刻 s",
-  "source": "q2_pareto.csv makespan_s（推荐档）"
+  "source": "q2_pareto.csv makespan_s（落盘推荐方案所在档）"
  },
  "QtwoExactCases": {
   "value": "6",
@@ -140,32 +140,32 @@
   "source": "q2_exact.csv 已证最优列求和（空值按 0）"
  },
  "QthreeRelays": {
-  "value": "6",
+  "value": "7",
   "meaning": "问题三 中继架次数",
   "source": "q3_relay_trips.csv 行数"
  },
  "QthreeStations": {
-  "value": "3",
+  "value": "5",
   "meaning": "悬停站数",
   "source": "q3_stations.csv 行数"
  },
  "QthreeSegs": {
-  "value": "71",
+  "value": "66",
   "meaning": "通信分段数",
   "source": "q3_comm_phases.csv 行数"
  },
  "QthreeIntervals": {
-  "value": "21",
+  "value": "19",
   "meaning": "通信失效区间数",
   "source": "q3_intervals.csv 行数"
  },
  "QthreeDirect": {
-  "value": "66.18\\%",
+  "value": "71.67\\%",
   "meaning": "直连时间占比",
   "source": "q3_metrics.csv 直连时间占比 ×100"
  },
  "QthreeRelayFrac": {
-  "value": "33.82\\%",
+  "value": "28.33\\%",
   "meaning": "中继时间占比",
   "source": "q3_metrics.csv 中继时间占比 ×100"
  },
@@ -175,57 +175,57 @@
   "source": "q3_metrics.csv 中断时间占比 ×100"
  },
  "QthreeTransEnergy": {
-  "value": "68.713",
+  "value": "69.316",
   "meaning": "问题三 运输能耗 kWh",
   "source": "q3_metrics.csv 运输能耗"
  },
  "QthreeRelayEnergy": {
-  "value": "4.963",
+  "value": "4.493",
   "meaning": "问题三 中继能耗 kWh",
   "source": "q3_metrics.csv 中继能耗"
  },
  "QthreeJointEnergy": {
-  "value": "73.676",
+  "value": "73.809",
   "meaning": "问题三 合计能耗 kWh",
   "source": "q3_metrics.csv 合计能耗"
  },
  "QthreeTransDone": {
-  "value": "10853.3",
+  "value": "9594.4",
   "meaning": "运输完工时刻 s",
   "source": "q3_metrics.csv 运输完工时刻"
  },
  "QthreeJointDone": {
-  "value": "10853.3",
+  "value": "9749.5",
   "meaning": "联合完工时刻 s",
   "source": "q3_metrics.csv 联合完工时刻"
  },
  "QthreeTardiness": {
-  "value": "223301.0",
+  "value": "14707.0",
   "meaning": "问题三 加权迟到",
   "source": "q3_metrics.csv 加权迟到"
  },
  "QthreeLateBoxes": {
-  "value": "6",
+  "value": "1",
   "meaning": "迟到箱数",
   "source": "q3_metrics.csv 迟到箱数"
  },
  "QthreeMaxLate": {
-  "value": "5472.5",
+  "value": "1470.7",
   "meaning": "最长迟到 s",
   "source": "q3_metrics.csv 最长迟到"
  },
  "QthreeMinMargin": {
-  "value": "69.3",
+  "value": "5.4",
   "meaning": "最小硬时限余量 s",
   "source": "q3_metrics.csv 最小硬时限余量"
  },
  "QthreeStaggered": {
-  "value": "5",
+  "value": "11",
   "meaning": "错峰推迟架次数",
   "source": "q3_metrics.csv 错峰推迟架次数"
  },
  "QthreeDelaySum": {
-  "value": "11862.3",
+  "value": "17291.5",
   "meaning": "累计推迟量 s",
   "source": "q3_metrics.csv 累计推迟量"
  },
@@ -240,27 +240,27 @@
   "source": "q4_comparison.csv K"
  },
  "QfourR": {
-  "value": "30",
+  "value": "31",
   "meaning": "问题四 资源规模 R",
   "source": "q4_comparison.csv 资源规模R"
  },
  "QfourCV": {
-  "value": "0.7462",
+  "value": "0.6362",
   "meaning": "问题四 工作量均衡 CV",
   "source": "q4_comparison.csv 工作量均衡CV_W"
  },
  "QfourRelayNeed": {
-  "value": "3",
+  "value": "2",
   "meaning": "中继无人机总需求",
   "source": "q4_comparison.csv 中继总需求最小"
  },
  "QfourGapSum": {
-  "value": "2",
+  "value": "1",
   "meaning": "单份库存下的总量缺口",
   "source": "q4_comparison.csv 总量缺口"
  },
  "QfourRedundancy": {
-  "value": "2",
+  "value": "0",
   "meaning": "总量冗余",
   "source": "q4_comparison.csv 总量冗余"
  },
@@ -275,12 +275,12 @@
   "source": "q4_partition.csv 行数"
  },
  "QfourAllPartitions": {
-  "value": "364",
+  "value": "88573",
   "meaning": "枚举分区总数",
   "source": "q4_all_partitions.csv 行数"
  },
  "QfourUnits": {
-  "value": "7",
+  "value": "12",
   "meaning": "任务单元数",
   "source": "q4_units.csv 行数"
  }

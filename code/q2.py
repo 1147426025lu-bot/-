@@ -17,6 +17,7 @@
 的解直接判为不可行（目标值取 +∞）并逐出解空间；非医疗非首批的 expect 只作软目标。
 """
 import sys
+import argparse
 sys.stdout.reconfigure(encoding='utf-8')
 import numpy as np
 import pandas as pd
@@ -57,8 +58,20 @@ SOL_CACHE = os.path.join(OUT, 'q2_solution.json')
 # ---------------------------------------------------------------------------
 # 几何预计算
 # ---------------------------------------------------------------------------
+GEO_EPOCH = 0
+
+
 def precompute_geometry(d):
-    """预计算所有有序节点对之间的航段几何量。节点集合 {O01} ∪ S1..S15。"""
+    """预计算所有有序节点对之间的航段几何量。节点集合 {O01} ∪ S1..S15。
+
+    几何纪元：_TRIP_CACHE 与 q2_v2 的路线缓存都以「机型/箱集合」为键，**都不含几何**，
+    全工程靠「一个进程一份几何」成立（阶段 1.5 改过 DEM 口径，当时正是这里最险）。
+    每次重算几何就清一次备忘并递增纪元，把「换了 DEM 步长结果却不变」这类静默错误
+    变成「缓存必然落空」。清缓存是纯失效操作，不改任何数值。
+    """
+    global GEO_EPOCH
+    _TRIP_CACHE.clear()
+    GEO_EPOCH += 1
     nodes = {'O01': dict(lon=d.O01['lon'], lat=d.O01['lat'], alt=d.O01['alt'])}
     for s in d.services:
         nodes[s['id']] = dict(lon=s['lon'], lat=s['lat'], alt=s['alt'] + 30.0)
@@ -289,7 +302,16 @@ def construct_trips(d, pack_type='C'):
             p0 = trip_plan(d, tP, [sid], {sid: bs})
             rest.append(dict(route=[sid], boxes_at={sid: bs}, mass=mass, vol=vol,
                              _dur=p0['duration'], urgent=False))
-    # 合并非紧急架次（省架次）
+    trips.extend(merge_nonurgent(d, rest, tP))
+    return trips
+
+
+def merge_nonurgent(d, rest, tP):
+    """贪心合并单区非紧急架次为多区架次（省架次：合并省下的是往返航段）。
+
+    抽成独立函数是为了让 q2_v2 的精确组批复用**同一份**合并逻辑：两条路径若各写
+    一份，合并准则就会悄悄分叉，消融对比也就不再只差组批那一步。
+    """
     merged = True
     while merged:
         merged = False
@@ -321,8 +343,7 @@ def construct_trips(d, pack_type='C'):
                             _dur=plan['duration'], urgent=False)
             rest.pop(bj)
             merged = True
-    trips.extend(rest)
-    return trips
+    return rest
 
 
 # ---------------------------------------------------------------------------
@@ -343,14 +364,20 @@ def trip_sort_key(trip):
     return (min(hard) if hard else 1e9, min(soft) if soft else 1e9)
 
 
-def schedule(d, trips, order=None, dispatch='earliest'):
+def schedule(d, trips, order=None, dispatch='earliest', rank_bonus=300.0):
     """
     对架次序列做机型分配与时间调度。
 
     order:    派工优先级序列（trips 下标的一个排列）。None = 按紧迫度排序，
               与历史行为逐位一致（main() 里有回归断言把关）。
-    dispatch: 'earliest' = 选使开始时刻最早的机型（历史行为）；
-              'ect'      = 选使完成时刻最早的机型。
+    dispatch: 'earliest'   = 选使开始时刻最早的机型（历史行为）；
+              'ect'        = 选使完成时刻最早的机型；
+              'balanced'   = 瓶颈感知选型：在 rank_bonus 秒的时间窗内优先派给装得下
+                             的**最小**机型。重载机只有 2 架，若按「就绪即派」会把它们
+                             先耗在轻载架次上，等真正需要 C 型的大架次到达时反而无资源
+                             可用；给机型加一个随载重递增的名义代价，使轻载架次让位于
+                             大架次。实际开始时刻仍取最早可用的无人机与电池。
+    rank_bonus: 'balanced' 的机型让位时间窗（秒）。
     返回 assignment: list of dict（每架次：trip_idx/type/uav/battery/start/plan/
                                   deliver_abs/route/boxes_at）
     """
@@ -378,7 +405,12 @@ def schedule(d, trips, order=None, dispatch='earliest'):
             u = min(uavs[g], key=lambda x: x['free_at'])
             bat = min(batteries[g], key=lambda x: x['ready_at'])
             start = max(u['free_at'], bat['ready_at'])
-            if dispatch == 'earliest':
+            if dispatch == 'balanced':
+                score = start + rank_bonus * TYPE_RANK[g]
+                better = (best is None or score < best['score'] - 1e-9
+                          or (abs(score - best['score']) < 1e-6
+                              and plan['E'] < best['plan']['E']))
+            elif dispatch == 'earliest':
                 better = (best is None or start < best['start']
                           or (abs(start - best['start']) < 1e-6 and plan['E'] < best['plan']['E']))
             else:
@@ -386,7 +418,9 @@ def schedule(d, trips, order=None, dispatch='earliest'):
                 better = (best is None or ect < best['ect']
                           or (abs(ect - best['ect']) < 1e-6 and plan['E'] < best['plan']['E']))
             if better:
-                best = dict(g=g, plan=plan, start=start, u=u, bat=bat, ect=start + plan['duration'])
+                best = dict(g=g, plan=plan, start=start, u=u, bat=bat,
+                            ect=start + plan['duration'],
+                            score=start + rank_bonus * TYPE_RANK[g])
         if best is None:
             # 资源终会空闲，唯一失败模式是该架次对 A/B/C 全不可行
             raise RuntimeError('架次不可行')
@@ -465,6 +499,10 @@ def evaluate(d, assignment):
 ALNS_SEED = 20260923
 K_TARGETS = [20, 22, 25, 30, 35, 40]
 
+# 机型「重载程度」序：A 最轻、C 最重。schedule(dispatch='balanced') 用它的
+# 倍数作为让位代价，使稀缺的重载机不被轻载架次先占（见 schedule 的说明）。
+TYPE_RANK = {'A': 0, 'B': 1, 'C': 2}
+
 # 目标权重（时效优先）：加权时延为主，完成时间为辅。归一化基准取基线值，
 # 使两项量纲无关、权重可直接解释。架次数不做平权加权，改用 ε-约束扫描。
 W_TARD = 1.0
@@ -500,7 +538,7 @@ def _feasible_trip(d, t):
 
 
 def objective(d, trips, order, k_target=None, ref_tard=1.0, ref_ms=1.0, mode='time',
-              ref_E=1.0):
+              ref_E=1.0, dispatch='earliest', rank_bonus=300.0):
     """目标值。硬时限违反 => +inf（从解空间剔除）。
 
     mode='time'   时效优先：加权时延 + 0.3×makespan（归一化），架次数用 ε-约束罚。
@@ -512,7 +550,7 @@ def objective(d, trips, order, k_target=None, ref_tard=1.0, ref_ms=1.0, mode='ti
     """
     st = to_sched_trips(d, trips)
     try:
-        asg = schedule(d, st, order=order)
+        asg = schedule(d, st, order=order, dispatch=dispatch, rank_bonus=rank_bonus)
     except RuntimeError:
         return float('inf'), None
     m = evaluate(d, asg)
@@ -824,7 +862,8 @@ REPAIR_OPS = [repair_greedy, repair_regret2, repair_newtrip, repair_group]
 # --- 主循环 ----------------------------------------------------------------
 def alns(d, init_trips, k_target=None, n_iter=3000, seed=ALNS_SEED,
          use_order=True, freeze_boxes=False, ref_tard=1.0, ref_ms=1.0,
-         trace=None, mode='time', ref_E=1.0, t0=None, archive=None):
+         trace=None, mode='time', ref_E=1.0, t0=None, archive=None,
+         dispatch='earliest', rank_bonus=300.0, patience=None, init_order=None):
     """
     自适应大邻域搜索。
       use_order    False = 派工顺序恒按紧迫度（消融用）
@@ -832,12 +871,23 @@ def alns(d, init_trips, k_target=None, n_iter=3000, seed=ALNS_SEED,
       t0           初始温度；None = 用 T0（时效口径的标定值）。
                    mode='energy' 时目标量级不同，必须由调用方给出匹配的 t0。
       archive      调用方传入的空列表：就地收集**可行档案**（见 _archive）。
+      dispatch     派工策略，透传给 schedule()；'balanced' 为瓶颈感知选型。
+      patience     档案连续多少轮无改进即提前结束；None = 跑满 n_iter。
+                   判据只看**可行档案的目标值**，与随机数无关，故不破坏可复现性；
+                   档案还是空的时候不计入（此时是「一个可行解都没找到」，
+                   恰恰最不该停），空档案一律跑满。
+      init_order   起始派工顺序，须是 init_trips 的一个置换；None = 按紧迫度。
+                   供上层把「派发顺序局部寻优」的结果带进来，否则那一轮的收益
+                   会在进入搜索的瞬间被 _default_order 抹掉。
     返回 (best_trips, best_order, best_metrics, best_f, 算子权重)
     """
     rng = random.Random(seed)
     trips = [dict(route=list(t['route']), boxes=list(t['boxes'])) for t in init_trips]
-    order = _default_order(d, trips)
-    f_cur, m_cur = objective(d, trips, order, k_target, ref_tard, ref_ms, mode, ref_E)
+    order = _default_order(d, trips) if init_order is None else [int(i) for i in init_order]
+    if sorted(order) != list(range(len(trips))):
+        raise ValueError('init_order 必须是 init_trips 的置换')
+    f_cur, m_cur = objective(d, trips, order, k_target, ref_tard, ref_ms, mode, ref_E,
+                             dispatch, rank_bonus)
     best_trips = [dict(route=list(t['route']), boxes=list(t['boxes'])) for t in trips]
     best_order, best_m, best_f = list(order), m_cur, f_cur
 
@@ -883,6 +933,8 @@ def alns(d, init_trips, k_target=None, n_iter=3000, seed=ALNS_SEED,
         del arch[ARCHIVE_MAX:]
 
     _archive(f_cur, m_cur, trips, order)
+    _arch_f = arch[0]['f'] if arch else float('inf')
+    stall = 0
 
     for it in range(n_iter):
         T = T0 * (T1 / T0) ** (it / max(1, n_iter - 1))
@@ -914,7 +966,7 @@ def alns(d, init_trips, k_target=None, n_iter=3000, seed=ALNS_SEED,
                 if REPAIR_OPS[ri] is repair_group:
                     ctx = dict(evaluate=lambda cand: objective(
                         d, cand, _remap_order(d, trips, order, cand),
-                        k_target, ref_tard, ref_ms, mode, ref_E))
+                        k_target, ref_tard, ref_ms, mode, ref_E, dispatch, rank_bonus))
                 new_trips = REPAIR_OPS[ri](d, new_trips, removed, rng, ctx)
         except RuntimeError:
             # 兜底动作失效（理论上不会发生）：丢弃该解，权重记 0 分
@@ -931,9 +983,16 @@ def alns(d, init_trips, k_target=None, n_iter=3000, seed=ALNS_SEED,
         if not use_order:
             new_order = _default_order(d, new_trips)
         f_new, m_new = objective(d, new_trips, new_order, k_target, ref_tard, ref_ms,
-                                 mode, ref_E)
+                                 mode, ref_E, dispatch, rank_bonus)
         # 档案收集与接受与否无关：被拒绝的可行解也可能是该档更好的可行解
         _archive(f_new, m_new, new_trips, new_order)
+        if arch:
+            if arch[0]['f'] < _arch_f - 1e-12:
+                _arch_f, stall = arch[0]['f'], 0
+            else:
+                stall += 1
+                if patience is not None and stall >= patience:
+                    break          # 档案久无改进：该档已榨干，提前让位给下一个种子
         accept = False
         if math.isfinite(f_new):
             if f_new < f_cur:
@@ -1076,10 +1135,12 @@ def _box_index(d):
     return {b['id']: b for bs in d.boxes_by_service.values() for b in bs}
 
 
-def save_recommended(d, st, order, m, path=None):
+def save_recommended(d, st, order, m, path=None, dispatch='earliest', rank_bonus=300.0):
     """
-    把推荐方案写盘。存「路线 + 各区货箱 id + 派工顺序」即可完整还原：
-    schedule() 对同一 (trips, order) 是确定性函数，故读回后重解必得同一结果。
+    把推荐方案写盘。存「路线 + 各区货箱 id + 派工顺序 + 派工策略」即可完整还原：
+    schedule() 对同一 (trips, order, dispatch, rank_bonus) 是确定性函数，故读回后
+    重解必得同一结果。dispatch 必须一起存：它是解码规则的一部分，只存输入不存规则，
+    换一个引擎写盘、另一个引擎读回，就会还原成**另一套机型指派**。
     """
     path = REC_CACHE if path is None else path
 
@@ -1092,6 +1153,8 @@ def save_recommended(d, st, order, m, path=None):
 
     payload = dict(
         order=[int(i) for i in order],
+        dispatch=str(dispatch),
+        rank_bonus=float(rank_bonus),
         trips=[dict(route=list(t['route']),
                     boxes_at={s: [b['id'] for b in bs]
                               for s, bs in t['boxes_at'].items()})
@@ -1103,7 +1166,11 @@ def save_recommended(d, st, order, m, path=None):
 
 
 def load_recommended(d, path=None):
-    """读回落盘的推荐方案，返回 (trips, order, metrics)。"""
+    """读回落盘的推荐方案，返回 (trips, order, metrics, dispatch, rank_bonus)。
+
+    dispatch/rank_bonus 缺省回退 'earliest'/300.0：阶段 11 之前的缓存文件没有这两个
+    字段，按当时的行为重解，旧方案仍能逐位复现。
+    """
     path = REC_CACHE if path is None else path
     if not os.path.exists(path):
         raise FileNotFoundError(
@@ -1115,7 +1182,8 @@ def load_recommended(d, path=None):
                boxes_at={s: [idx[bid] for bid in ids]
                          for s, ids in t['boxes_at'].items()})
           for t in payload['trips']]
-    return st, [int(i) for i in payload['order']], payload['metrics']
+    return (st, [int(i) for i in payload['order']], payload['metrics'],
+            payload.get('dispatch', 'earliest'), float(payload.get('rank_bonus', 300.0)))
 
 
 def recommended(d, verbose=False):
@@ -1124,8 +1192,8 @@ def recommended(d, verbose=False):
     实跑并落盘的那一份推荐解。读回后会重解一次 schedule() 并断言与落盘指标逐位
     一致——若不一致说明 schedule() 的语义被改过，属必须立刻暴露的破坏性变更。
     """
-    st, order, m_ref = load_recommended(d)
-    asg = schedule(d, st, order=order)
+    st, order, m_ref, dispatch, rank_bonus = load_recommended(d)
+    asg = schedule(d, st, order=order, dispatch=dispatch, rank_bonus=rank_bonus)
     m = evaluate(d, asg)
     assert m['hard_viol'] == 0, '读回的推荐方案违反硬时限，缓存已失效'
     for k, v in m_ref.items():
@@ -1182,8 +1250,14 @@ def pareto_front(rows):
     return out
 
 
-def ablation(d, n_iter=3000, ref_tard=1.0, ref_ms=1.0):
-    """消融：①基线 ②仅顺序 ③ALNS 关顺序 ④ALNS 全量。防止把顺序的功劳记到组批搜索上。"""
+def ablation(d, n_iter=3000, ref_tard=1.0, ref_ms=1.0, v2_row=None):
+    """消融：①基线 ②仅顺序 ③ALNS 关顺序 ④ALNS 全量（+⑤三层全移，由 v2_row 提供）。
+
+    ①–④用于防止把顺序的功劳记到组批搜索上。v2_row 是 q2_v2.ablation_row_v2：
+    本函数不 import q2_v2——依赖方向只能是 q2_v2 → q2，反向 import 会让
+    `python code/q2.py` 时出现第二份 q2 模块（两个 GEO_EPOCH、两份 _TRIP_CACHE），
+    静默破坏「一个进程一份几何」（见 q2_v2 顶部的重绑说明）。
+    """
     base_trips = construct_trips(d, pack_type='C')
     init = [dict(route=list(t['route']), boxes=[b for v in t['boxes_at'].values() for b in v])
             for t in base_trips]
@@ -1207,10 +1281,50 @@ def ablation(d, n_iter=3000, ref_tard=1.0, ref_ms=1.0):
                              ref_tard=ref_tard, ref_ms=ref_ms)
     out.append(dict(name='④ALNS 全量（组批 + 顺序）', **{k: bm[k] for k in
                  ('n_trips', 'total_E', 'makespan', 'tardiness', 'hard_viol')}))
+    if v2_row is not None:
+        # ⑤与④同预算同种子，差的是组批/派发/解码这三层，故④→⑤可直接读作移植收益
+        out.append(v2_row(d, n_iter=n_iter, ref_tard=ref_tard, ref_ms=ref_ms))
     return out
 
 
-def main():
+def main(argv=None):
+    ap = argparse.ArgumentParser(
+        description='问题二：异构多点多架次调度（ε-约束 ALNS）')
+    ap.add_argument('--engine', choices=['legacy', 'v2'], default='legacy',
+                    help='legacy = 阶段 10 及以前的引擎（默认，逐位可复现）；'
+                         'v2 = 阶段 11 移植的精确组批 + 瓶颈感知解码 + 多种子档间热启动。'
+                         '两种引擎的落盘格式与下游接口完全一致。')
+    ap.add_argument('--seeds', type=int, default=5,
+                    help='v2 每档的独立种子数（legacy 忽略）')
+    ap.add_argument('--iters', type=int, default=None,
+                    help='单次 ALNS 轮数；缺省 legacy=4000、v2=3500')
+    ap.add_argument('--patience', type=int, default=None,
+                    help='v2 档案连续无改进即停该档的轮数；缺省 max(1500, iters//3)，'
+                         '传 0 表示跑满')
+    ap.add_argument('--tier-budget', type=float, default=None,
+                    help='v2 单档墙钟上限（秒）；达到即停该档并如实标注未收敛')
+    ap.add_argument('--sa-iters', type=int, default=4000,
+                    help='v2 定型后退火派发顺序的轮数；0 = 关闭（回到 F7 爬山）')
+    ap.add_argument('--no-relay-gate', action='store_true',
+                    help='v2 关闭「中继可行择序」门禁。默认开启：在**指标逐位不变**的'
+                         '同机架次互换候选里，按第三问的字典序挑一个让通信保障更好的'
+                         '派工顺序。关掉只为诊断对照，正式落盘不得关闭。')
+    ap.add_argument('--relay-gate-probe', type=int, default=16,
+                    help='中继门禁最多评估多少条候选（含基线）；超出的如实报数不静默丢')
+    ap.add_argument('--k-targets', type=str, default=None,
+                    help='逗号分隔的 K 档位，覆盖默认的 20,22,25,30,35,40。'
+                         '收窄档位的用途是**只扫出中继可行的那一档**：问题三的'
+                         '"连续通信"是题给的硬约束，而架次越多同时需要中继的'
+                         '运输架次越多（实测 25 架次方案的并发中继需求峰值 3，'
+                         '超过 2 架中继机），此时问题三只能靠中断收场。故终选要'
+                         '在"问题三零中断"的可行集里挑完工最早的那个，而不是'
+                         '直接取全局完工最早的那个。')
+    args = ap.parse_args(argv)
+    if args.k_targets:
+        global K_TARGETS
+        K_TARGETS = [int(x) for x in args.k_targets.split(',') if x.strip()]
+    iters = args.iters if args.iters is not None else (3500 if args.engine == 'v2' else 4000)
+
     d = load_data()
     d.geo_nodes, d.geo = precompute_geometry(d)
     t_start = time.time()
@@ -1240,8 +1354,25 @@ def main():
 
     # --- ALNS 扫描 ε-约束 ---------------------------------------------------
     print('=' * 74)
-    print('ε-约束扫描架次数 K（ALNS，时效优先目标）')
-    st, asg, m, info = solve_recommended(d, n_iter=4000, verbose=True)
+    v2_row = None
+    if args.engine == 'v2':
+        import q2_v2
+        assert q2_v2.self_check(d, verbose=True), 'v2 引擎自检未通过'
+        d.geo_nodes, d.geo = precompute_geometry(d)
+        patience = (max(1500, iters // 3) if args.patience is None
+                    else (None if args.patience == 0 else args.patience))
+        print(f'ε-约束扫描架次数 K（v2：精确组批 + 瓶颈感知解码 + 多种子档间热启动，'
+              f'{args.seeds} 种子 × {iters} 轮，耐心 {patience}，'
+              f'定型后退火 {args.sa_iters} 轮）')
+        st, asg, m, info = q2_v2.solve_recommended_v2(
+            d, n_iter=iters, seeds=args.seeds, verbose=True,
+            patience=patience, tier_budget=args.tier_budget,
+            sa_iters=args.sa_iters, relay_gate=not args.no_relay_gate,
+            relay_gate_max_probe=args.relay_gate_probe)
+        v2_row = q2_v2.ablation_row_v2
+    else:
+        print('ε-约束扫描架次数 K（ALNS，时效优先目标）')
+        st, asg, m, info = solve_recommended(d, n_iter=iters, verbose=True)
     assert m['n_trips'] <= info['K'], '推荐解超出所选 ε 档位'
     print(f'  推荐（取自 K<={info["K"]} 的可行档案）: 架次={m["n_trips"]} '
           f'能耗={m["total_E"]:.3f} kWh makespan={m["makespan"]:.1f} s '
@@ -1255,7 +1386,8 @@ def main():
     # --- 消融 ---------------------------------------------------------------
     print('=' * 74)
     print('消融实验')
-    abl = ablation(d, n_iter=3000, ref_tard=info['ref_tard'], ref_ms=info['ref_ms'])
+    abl = ablation(d, n_iter=3000, ref_tard=info['ref_tard'], ref_ms=info['ref_ms'],
+                   v2_row=v2_row)
     for r in abl:
         print(f'  {r["name"]:26s} 架次={r["n_trips"]:2d} 能耗={r["total_E"]:7.3f} '
               f'makespan={r["makespan"]:9.1f} 时延={r["tardiness"]:10.1f} 硬违反={r["hard_viol"]}')
@@ -1320,7 +1452,10 @@ def export(d, asg, info, abl):
 
     # ---- ε-约束扫描全表（原始记录，含搜索末态与可行档案两种情况）--------------
     # 末态可能超 K（破坏后尚未并回），档案内则必定满足 n_trips<=K；两者都如实写出，
-    # 不做取舍。推荐解取的是档案内最优（见 solve_recommended）。
+    # 不做取舍。档案* 各列一律取 archive[0]（该档按 f 排第一的那条），是**搜索过程的
+    # 原样记录**，不掺下游加工。故同一档的两张表可能不同：q2_pareto.csv 那行是该档
+    # 交付的代表解（按题目优先级挑档案条目 + 过定型轮），本表这行是档案第一条。
+    # 两者都留着是有意的——正是它们的差说明了「为什么选中的不是档案第一条」。
     scan = []
     for K, r in sorted(info['runs'].items()):
         m, a = r['metrics'], r['archive']
@@ -1340,18 +1475,30 @@ def export(d, asg, info, abl):
     pd.DataFrame(scan).to_csv(os.path.join(OUT, 'q2_scan.csv'), index=False)
 
     # ---- 四维非支配前沿：对**全精度**指标调用 pareto_front() -------------------
-    # 只用「档案内最优」这一行代表该档（每档一个解），维度为
-    # (架次, 完工时间, 加权时延, 能耗)。被支配行**不写进** q2_pareto.csv，
-    # 但保留在 q2_scan.csv 里，读者可自行核对谁支配了谁。
+    # 每档用**该档的交付代表解**这一行代表该档（每档一个解），维度为
+    # (架次, 完工时间, 加权时延, 能耗)。被支配行仍写进 q2_pareto.csv 但标「否」，
+    # 读者可自行核对谁支配了谁。
+    # 代表解从哪来：v2 引擎在 info['reps'] 里给出——它是该档档案里按题目优先级
+    # （时延 → 完工 → 能耗 → 架次）挑中的那一条，过完 F7 与退火的定型轮之后的指标，
+    # 也就是**这一档真正会交付的解**；legacy 引擎没有 reps，沿用 archive[0]（按 f
+    # 排第一的那条），行为与改动前逐位一致。
+    # 为什么不能一律用 archive[0]：v2 的推荐方案是「档案条目 + 定型轮」的产物，
+    # 而 archive[0] 是定型**前**的另一个解（本次 24 架次/70.201 kWh/6701.9 s
+    # vs 交付的 24 架次/69.342 kWh/6506.1 s），于是**落盘方案在表里查不到**，
+    # paper_metrics.py 的溯源断言会当场拒绝——论文写的推荐档数字就与方案记录脱钩。
+    reps = info.get('reps') or {}
     cand = []
     for K, r in sorted(info['runs'].items()):
-        if not r['archive']:
-            continue
-        e = r['archive'][0]
-        # 只展开 metrics：evaluate() 的返回里已经有 n_trips/makespan/tardiness/
-        # total_E/hard_viol，再显式传一遍同名的关键字会撞成
-        # 「TypeError: dict() got multiple values for keyword argument」。
-        cand.append(dict(K上限=K, **e['metrics'], 目标值=e['f'], 耗时s=r['secs']))
+        rp = reps.get(K)
+        if rp is not None:
+            # 只展开 metrics：evaluate() 的返回里已经有 n_trips/makespan/tardiness/
+            # total_E/hard_viol，再显式传一遍同名的关键字会撞成
+            # 「TypeError: dict() got multiple values for keyword argument」。
+            cand.append(dict(K上限=K, **rp['metrics'], 目标值=rp['f'],
+                             耗时s=r['secs']))
+        elif r['archive']:
+            e = r['archive'][0]
+            cand.append(dict(K上限=K, **e['metrics'], 目标值=e['f'], 耗时s=r['secs']))
     front = pareto_front(cand)
     on_front = {(round(x['n_trips'], 9), round(x['makespan'], 9),
                  round(x['tardiness'], 9), round(x['total_E'], 9)) for x in front}

@@ -1,0 +1,29 @@
+# 检出风格必须固定，理由只有一个：方案记录里的源码哈希是**按字节**算的
+# （code/solution_io.py 的 solver_hashes），字节一变，results/q2_solution.json
+# 与 q3_solution.json 就会被加载器判成"求解器源码已变"，整条问题三/四的复算链
+# 直接拒绝加载——而这个失败看起来像"代码被改过"，实际只是换行符不同。
+#
+# 本工程的源码换行并不统一，因为写入方式不同：脚本以文本模式写出的文件是
+# CRLF，编辑器/工具写出的文件是 LF。记录哈希就是按当时的工作区字节算的，
+# 所以下面逐个锁定，而不是一刀切：
+#   code/core.py、code/q2.py                记的是 CRLF 字节
+#   code/q3.py、code/solution_io.py         记的是 LF 字节
+#   code/q2_v2.py、code/q3_v2.py            记的是 LF 字节
+# 这六个文件都在 code/solution_io.py 的 Q2_SOLVER_FILES / Q3_SOLVER_FILES 里。
+# 改动它们之前，先改哈希口径（对文本做 CRLF→LF 归一后再算），并重出方案记录；
+# 只改这里会让上面两个记录当场失效。
+code/core.py text eol=crlf
+code/q2.py text eol=crlf
+code/q3.py text eol=lf
+code/solution_io.py text eol=lf
+code/q2_v2.py text eol=lf
+code/q3_v2.py text eol=lf
+
+# 其余文本文件按内容自动判定，二进制文件不做任何转换。
+* text=auto
+*.pdf -text
+*.png -text
+*.ttf -text
+*.xlsx -text
+*.mat -text
+*.tif -text

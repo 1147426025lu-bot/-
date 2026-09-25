@@ -4,22 +4,22 @@
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="vlab_0" value="构&lt;br&gt;造&lt;br&gt;基&lt;br&gt;线" style="text;html=1;strokeColor=none;fillColor=none;whiteSpace=wrap;fontSize=17;fontColor=#000000;align=center;verticalAlign=top;" vertex="1" parent="1">
+        <mxCell id="vlab_0" value="精&lt;br&gt;确&lt;br&gt;组&lt;br&gt;批" style="text;html=1;strokeColor=none;fillColor=none;whiteSpace=wrap;fontSize=17;fontColor=#000000;align=center;verticalAlign=top;" vertex="1" parent="1">
   <mxGeometry x="20.0" y="18.0" width="20.0" height="298.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_0_0" value="紧急货箱&lt;br&gt;单独组批" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_0_0" value="枚举可行子集&lt;br&gt;子集 DP 装箱" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="44.0" y="14.0" width="198.0" height="50.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_0_1" value="非紧急货箱&lt;br&gt;FFD 装箱" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_0_1" value="紧急货箱&lt;br&gt;每区单独成架次" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="44.0" y="72.0" width="198.0" height="50.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_0_2" value="地理相近架次&lt;br&gt;贪心合并" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_0_2" value="A/B/C 候选池&lt;br&gt;按掩码合并去重" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="44.0" y="130.0" width="198.0" height="50.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_0_3" value="紧迫度排序&lt;br&gt;枚举 A/B/C 机型" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_0_3" value="重载子集由 C 型&lt;br&gt;轻载可由 A/B 承载" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="44.0" y="188.0" width="198.0" height="50.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_0_4" value="最早空闲无人机&lt;br&gt;与就绪电池" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_0_4" value="超 16 箱回退&lt;br&gt;FFD 装箱" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="44.0" y="246.0" width="198.0" height="50.0" as="geometry" />
 </mxCell>
         <mxCell id="vlab_1" value="邻&lt;br&gt;域&lt;br&gt;搜&lt;br&gt;索" style="text;html=1;strokeColor=none;fillColor=none;whiteSpace=wrap;fontSize=17;fontColor=#000000;align=center;verticalAlign=top;" vertex="1" parent="1">
@@ -28,31 +28,31 @@
         <mxCell id="box_1_0" value="ALNS 解空间&lt;br&gt;(划分, 派工顺序 π)" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="320.0" y="14.0" width="198.0" height="50.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_1_1" value="7 个破坏算子&lt;br&gt;随机·Shaw·整区" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_1_1" value="7 破坏 + 4 修复&lt;br&gt;含成组修复" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="320.0" y="72.0" width="198.0" height="50.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_1_2" value="4 个修复算子&lt;br&gt;含成组修复" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_1_2" value="路线全排列&lt;br&gt;按集合×机型缓存" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="320.0" y="130.0" width="198.0" height="50.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_1_3" value="轮盘赌自适应&lt;br&gt;算子权重" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_1_3" value="瓶颈感知解码&lt;br&gt;最小可载机型优先" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="320.0" y="188.0" width="198.0" height="50.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_1_4" value="模拟退火&lt;br&gt;接受准则" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_1_4" value="轮盘赌权重&lt;br&gt;模拟退火接受" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="320.0" y="246.0" width="198.0" height="50.0" as="geometry" />
 </mxCell>
         <mxCell id="vlab_2" value="约&lt;br&gt;束&lt;br&gt;扫&lt;br&gt;描" style="text;html=1;strokeColor=none;fillColor=none;whiteSpace=wrap;fontSize=17;fontColor=#000000;align=center;verticalAlign=top;" vertex="1" parent="1">
   <mxGeometry x="572.0" y="18.0" width="20.0" height="298.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_2_0" value="ε-约束扫描&lt;br&gt;固定 K∈&lt;br&gt;{20,22,25,30,35,40}" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_2_0" value="ε-约束扫描&lt;br&gt;固定 K∈&lt;br&gt;{20,22,25,30}" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="596.0" y="14.0" width="198.0" height="66.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_2_1" value="逐档最优化&lt;br&gt;时效目标" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_2_1" value="每档 5 个种子&lt;br&gt;档间热启动" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="596.0" y="88.0" width="198.0" height="50.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_2_2" value="四维非支配前沿&lt;br&gt;架次·能耗·时间·时延" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_2_2" value="可行档案 ≤12 条&lt;br&gt;违约 0 且架次 ≤ K" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="596.0" y="146.0" width="198.0" height="50.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_2_3" value="时效优先取&lt;br&gt;K ≤ 20 档" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_2_3" value="按优先级字典序&lt;br&gt;时延→完工→能耗" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="596.0" y="204.0" width="198.0" height="50.0" as="geometry" />
 </mxCell>
         <mxCell id="box_2_4" value="架次数是手段&lt;br&gt;而非目的" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
@@ -64,7 +64,7 @@
         <mxCell id="arr_1" value="" style="shape=singleArrow;direction=east;html=1;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;arrowWidth=0.42;arrowSize=0.30;" vertex="1" parent="1">
   <mxGeometry x="532.0" y="150.0" width="26.0" height="26.0" as="geometry" />
 </mxCell>
-        <mxCell id="bar" value="输出推荐方案：20 架次 · 68.713 kWh · 8732.6 s · 硬违约 0" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="bar" value="输出推荐方案：24 架次 · 69.316 kWh · 6506.1 s · 硬违约 0" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="20.0" y="336.0" width="774.0" height="34.0" as="geometry" />
 </mxCell>
       </root>

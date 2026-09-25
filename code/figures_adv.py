@@ -285,7 +285,13 @@ def fig_q2_alns():
     ax = axes[1]
     base = abl.iloc[0]
     metrics = [('makespan', '完成时刻'), ('total_E', '总能耗'), ('tardiness', '加权时延')]
-    names = ['①基线', '②仅顺序', '③ALNS\n(顺序固定)', '④ALNS\n全量']
+    # 第⑤项是阶段 11 的「三层全移（v2 引擎）」，协议与④逐项对齐（同轮数、同种子），
+    # 故④→⑤的差就是移植本身的收益。名字表必须与 q2_ablation.csv 的行数严格同长：
+    # 早先这里写死 4 项，而 y = np.arange(len(abl)) 随行数变，多出的第 5 行就会
+    # 标签错位（不报错），故第⑤行落地时同步改成 5 项并加下面的断言把关。
+    names = ['①基线', '②仅顺序', '③ALNS\n(顺序固定)', '④ALNS\n全量', '⑤三层\n全移']
+    assert len(names) == len(abl), \
+        f'消融标签 {len(names)} 项与 q2_ablation.csv 的 {len(abl)} 行不匹配'
     h = 0.26
     y = np.arange(len(abl))
     for k, (col, lab) in enumerate(metrics):
@@ -831,14 +837,16 @@ def fig_q4_resource():
     ax.set_xticklabels(RES_SHORT, fontsize=11, rotation=40, ha='right',
                        rotation_mode='anchor')
     ax.set_ylabel('总量口径缺口（架/组）')
-    ax.set_ylim(0, 2.6)
+    # 上限随数据走，并留出比「最高柱 + 其数值标注」更大的余量：图例占坐标区高度的
+    # 约五分之一，留 1.0 个数据单位即可保证它不压住任何柱顶。写死上限的旧版在
+    # 缺口为 2 时把图例压到柱顶的「2」上，在缺口为 1 时又白白空掉半个坐标区。
+    gap_max = max(cmp.loc[K, '总量缺口_' + k] for K in (2, 3) for k in RES_LABEL)
+    ax.set_ylim(0, max(2.0, gap_max + 1.0))
     ax.set_title('现有库存下的资源缺口')
-    # 图例不能放右上：最高的那根柱是「中继机」（K=3 缺口 2），柱顶 data 2.0 恰在
-    # 图例下沿，实测图例的红色色块把柱顶的数值标注「2」压掉一半、柱顶也被盖住。
-    # 改放 upper center：那一带（类目 2~5）最高的柱只有 1.0，整块是空的。
+    # 图例放 upper center：那一带是类目中部，配合上面的余量后不会与任何柱顶相撞。
     ax.legend(fontsize=11, loc='upper center')
-    # 红字随之下移到 0.72，同时让开 upper center 的图例与坐标区左上角的 (b) 编号
-    ax.text(0.03, 0.72, '63 / 301 个分区中\n库存可行者 0 个',
+    # 红字放在左下方，让开 upper center 的图例与坐标区左上角的 (b) 编号
+    ax.text(0.03, 0.72, '1023 / 28501 个分区中\n库存可行者 0 个',
             transform=ax.transAxes, fontsize=12.5, color=C_C, fontweight='bold', va='top')
     panel_tag(ax, '(b)')
 
@@ -1111,16 +1119,25 @@ def fig_resource_conflict():
     use = _resource_usage()
     keys = _ordered_keys(use)
 
-    n_ov = sum(1 for k in keys for x, y in zip(use[k], use[k][1:]) if y[0] < x[1] - 1e-6)
+    # 判据的容差必须与**结果表的精度**对齐，不能取 1e-6。占用区间由 CSV 反算：
+    # 时刻列留 3 位小数（±5e-4 s），返航时刻与充电时长各带一份，能耗列留 6 位
+    # （经充电曲线斜率放大约 ±1.4e-4 s），合计不超过 1.5e-3 s。用 1e-6 去卡，
+    # 边缘相接的两个架次（前一个「返航+充电」正好等于后一个起飞）会被舍入噪声
+    # 判成重叠——实测正是如此：T02 的电池释放重建值 2195.771111 对 T15 的起飞
+    # 2195.771，差 1.1e-4 s，纯粹是两边各留 3 位小数造成的。取 0.01 s，与
+    # `verify.py` 中同一套反算所用的 TOL 保持一致：比舍入噪声高一个量级，
+    # 又比任何真实的调度冲突小两个量级（本例真冲突是 1583 s）。
+    CSV_TOL = 0.01
+    n_ov = sum(1 for k in keys for x, y in zip(use[k], use[k][1:]) if y[0] < x[1] - CSV_TOL)
     # 只占用一次的资源没有相邻间隙（_min_gap 返回 None），统计时须剔除
     gb = [g for g in (_min_gap(use[k]) for k in keys if k[0] == 'bat:') if g is not None]
     gap_bat = min(gb)
     n_once = sum(1 for k in keys if _min_gap(use[k]) is None)
-    print('[自校验] 资源数 = %d，重叠处数 = %d，共享电池最小间隙 = %+.6e s（%d/%d 组电池有周转）'
-          % (len(keys), n_ov, gap_bat, len(gb), sum(1 for k in keys if k[0] == 'bat:')))
+    print('[自校验] 资源数 = %d，重叠处数 = %d（容差 %.2f s），共享电池最小间隙 = %+.6e s（%d/%d 组电池有周转）'
+          % (len(keys), n_ov, CSV_TOL, gap_bat, len(gb), sum(1 for k in keys if k[0] == 'bat:')))
     print('[自校验] 全场仅占用一次的资源 = %d 个' % n_once)
     assert n_ov == 0, '重建出的占用存在重叠 %d 处：口径与求解器不一致' % n_ov
-    assert 0.0 <= gap_bat < 1.0, '电池最小间隙 %.3e s 不在预期的亚秒量级' % gap_bat
+    assert -CSV_TOL <= gap_bat < 1.0, '电池最小间隙 %.3e s 不在预期的亚秒量级' % gap_bat
 
     # ---- (a) 资源×时间占用矩阵 ----
     tmax = max(iv[1] for k in keys for iv in use[k])
@@ -1237,7 +1254,21 @@ def fig_solution_network():
     eg = [(('t', t), ('g', t2type[t])) for t in order]
     print('[自校验] 服务区=%d 架次=%d 机型=%d 悬停站=%d | 边 服务区-架次=%d（去重前 %d）架次-机型=%d 架次-悬停站=%d'
           % (len(zones), len(tids), len(types), len(stations), len(ez), len(z2t), len(eg), len(t2st)))
-    assert (len(zones), len(tids), len(types), len(stations)) == (15, 20, 3, 3)
+    # 断言只查两类东西：**结构性不变量**（服务区 15 个、机型 3 种）与**与冻结方案的
+    # 一致性**（架次数 = q3_solution.json 的 transport_trips 数、悬停站数 = 它的
+    # station_ids 数）。不再写死 20 / 3 这类字面量——写死只在「方案恰好不变」时才对：
+    # 重解一次它要么拦住一张完全正确的图，要么逼着人把数字改成新值、从而彻底失去
+    # 把关作用。改成对 q3_solution.json 之后，这条断言把关的是「CSV 与冻结方案分叉」，
+    # 而那正是它真正要防的事故。
+    with open(os.path.join(RES, 'q3_solution.json'), encoding='utf-8') as _f:
+        _sol = json.load(_f)
+    assert (len(zones), len(types)) == (15, 3)
+    assert len(tids) == len(_sol['transport_trips']), \
+        '图上架次数 %d 与 q3_solution.json 的 %d 不符：CSV 与冻结方案已分叉' \
+        % (len(tids), len(_sol['transport_trips']))
+    assert len(stations) == len(_sol['station_ids']), \
+        '图上悬停站数 %d 与 q3_solution.json 的 %d 不符' \
+        % (len(stations), len(_sol['station_ids']))
     # 服务区访问共 z2t 次；去重后少掉的边是「两个不同架次访问了同一对服务区」
     assert len(ez) == len(set(z2t)) and len(eg) == len(tids)
 

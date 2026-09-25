@@ -24,6 +24,22 @@
 
 `solution_id` 是内容摘要的确定性函数：只要方案内容变了，id 必变，下游据此拒绝
 使用陈旧的上游文件。
+
+哈希口径（三句话写死，改动前先想清楚会让哪些方案记录失效）：
+
+ 1. **原始输入一律按字节校验**（`input_hashes` → `sha256_file`），不做任何规范化。
+    数据文件是二进制与第三者交付物，规范化它没有意义，只会削弱证据。
+ 2. **求解器源码同时记两套**：`solver_hashes` 是发布文件的字节哈希，判定「方案是否
+    过期」只认它，逐字节严格；`solver_text_hashes` 把换行统一成 LF 后再算，**不参与
+    判定**，只用来分辨不一致的原因（换行差异 vs 真改码）。
+ 3. 源码编码统一 UTF-8，换行由 `.gitattributes` 逐文件锁定（`core.py`/`q2.py` 为
+    CRLF，`q3.py`/`q4.py`/`solution_io.py`/`q2_v2.py`/`q3_v2.py` 为 LF）。换行风格是
+    记录的一部分，不是可有可无的格式偏好——字节哈希认的就是它。方案结构版本记在
+    `SCHEMA_VERSION`。
+
+这两套哈希合起来的作用是让「刷新哈希」不再是可选项：字节不一致时，文本哈希一致
+即证明代码逐字未动（改回换行即可），文本哈希不一致即证明代码真的改了（必须重跑）。
+见 `_diff_solver`。
 """
 import hashlib
 import json
@@ -37,8 +53,11 @@ DATA_DIR = os.path.join(ROOT, '数据')
 
 # 参与 solver_hashes 的源码文件。按阶段分开：只把**真正决定该阶段结果**的模块
 # 计入，否则改 q4.py 也会让 q2_solution.json 判为过期，哈希校验就失去意义了。
-Q2_SOLVER_FILES = ['core.py', 'q2.py', 'solution_io.py']
-Q3_SOLVER_FILES = ['core.py', 'q2.py', 'q3.py', 'solution_io.py']
+# q2_v2.py / q3_v2.py 是阶段 11 移植来的算法层（--engine v2、解法二并列路径）。
+# 它们不在这个表里就等于「论文的数来自一个不在记录里的文件」，故一并计入。
+Q2_SOLVER_FILES = ['core.py', 'q2.py', 'q2_v2.py', 'solution_io.py']
+Q3_SOLVER_FILES = ['core.py', 'q2.py', 'q2_v2.py', 'q3.py', 'q3_v2.py',
+                   'solution_io.py']
 
 REQUIRED_FIELDS = ['schema_version', 'solution_id', 'stage', 'input_hashes',
                    'solver_hashes', 'seed', 'budget']
@@ -56,6 +75,27 @@ def sha256_file(path, chunk=1 << 20):
                 break
             h.update(b)
     return h.hexdigest()
+
+
+def text_hash_file(path):
+    """源码的**文本规范化**哈希：换行统一成 LF 后再按字节算 SHA-256。
+
+    它不是 `sha256_file` 的替代品，而是用来**把两种字节差异分开**。核查源码
+    身份时「字节不一致」有两种原因，处置正好相反：换行符变了（代码一个字没动）
+    与代码真改了。只留字节哈希，这两者在方案记录里长得一模一样，读者无从判断
+    该改回换行还是该重跑——于是最省事的做法就成了「刷新哈希」，而那恰好会把
+    第二种（真改动）一并抹掉。正是这个歧义让「刷新哈希」看起来可用。
+
+    刻意**不**解码成字符串：编码变了同样属于"内容变了"，必须按真改动处理。
+    换行规范由 `.gitattributes` 逐文件锁定（core.py/q2.py 为 CRLF，其余源码
+    为 LF），此处的归一化只用于判断，不改变发布文件的字节。
+
+    归一化口径写死在此函数里，不开参数：口径一旦可调，两个不同的口径就能算出
+    同一个值，「哈希一致」也就不再是任何事情的证据。
+    """
+    with open(path, 'rb') as f:
+        b = f.read()
+    return hashlib.sha256(b.replace(b'\r\n', b'\n').replace(b'\r', b'\n')).hexdigest()
 
 
 def _rel(path):
@@ -79,12 +119,32 @@ SOLVER_FILES = Q3_SOLVER_FILES   # 兼容旧引用：默认取最全的一组
 
 
 def solver_hashes(files=None):
-    """求解器源码的 SHA-256 清单。代码改了，方案就不再可复现。"""
+    """求解器源码的**字节** SHA-256 清单。代码改了，方案就不再可复现。
+
+    这是发布文件的字节哈希，也是判定「方案是否过期」的依据——它保持逐字节
+    严格，不因换行规范化而放松。文本规范化哈希另见 `solver_hashes_text`，
+    只用于诊断不一致的原因，不参与判定。
+    """
     out = {}
     for fn in (SOLVER_FILES if files is None else files):
         p = os.path.join(HERE, fn)
         if os.path.exists(p):
             out['code/' + fn] = sha256_file(p)
+    return dict(sorted(out.items()))
+
+
+def solver_hashes_text(files=None):
+    """与 `solver_hashes` **同键**的文本规范化哈希清单（换行统一成 LF）。
+
+    两套哈希并列存进方案记录，才能回答「这次不一致是换行还是真改码」。
+    两套都缺一不可：只存规范化哈希会漏掉编码/行内空白之外的真实改动判定，
+    只存字节哈希则无法把误报和真改动分开。
+    """
+    out = {}
+    for fn in (SOLVER_FILES if files is None else files):
+        p = os.path.join(HERE, fn)
+        if os.path.exists(p):
+            out['code/' + fn] = text_hash_file(p)
     return dict(sorted(out.items()))
 
 
@@ -150,7 +210,8 @@ def save_solution(path, sol):
 
 
 def load_solution(path, stage=None, source_solution_id=None,
-                  input_hashes_expect=None, solver_hashes_expect=None):
+                  input_hashes_expect=None, solver_hashes_expect=None,
+                  solver_text_hashes_expect=None):
     """
     读方案并**逐项校验**：字段完整、内容摘要自洽、阶段正确、来源 id 一致。
     任一项不符即抛异常——陈旧或串了来源的上游文件必须当场暴露，不能带着往下算。
@@ -175,7 +236,8 @@ def load_solution(path, stage=None, source_solution_id=None,
     if input_hashes_expect is not None:
         _diff('输入数据', input_hashes_expect, sol.get('input_hashes', {}))
     if solver_hashes_expect is not None:
-        _diff('求解器源码', solver_hashes_expect, sol.get('solver_hashes', {}))
+        _diff_solver(solver_hashes_expect, sol.get('solver_hashes', {}),
+                     solver_text_hashes_expect, sol.get('solver_text_hashes', {}))
     return sol
 
 
@@ -183,6 +245,38 @@ def _diff(what, expect, got):
     bad = [k for k in sorted(set(expect) | set(got)) if expect.get(k) != got.get(k)]
     if bad:
         raise ValueError(f'{what}与方案记录不一致（{len(bad)} 项）：' + '、'.join(bad[:5]))
+
+
+def _diff_solver(expect, got, expect_text, got_text):
+    """源码字节哈希不一致时，用文本规范化哈希把两种原因分开报出来。
+
+    只说「求解器源码已变」，读者无法区分「换行符被编辑器改了」和「代码真改了」
+    ——而这两者的正确处置完全相反：前者改回换行即可，后者必须重跑。混成一条
+    消息的后果是，最省事的处置（刷新哈希）对两种情况都"能用"，于是真改动也
+    一并被抹掉。这里把原因写进异常，让误报和真改动各自可辨认、各自可处置。
+    """
+    bad = [k for k in sorted(set(expect) | set(got)) if expect.get(k) != got.get(k)]
+    if not bad:
+        return
+    eol_only, real = [], []
+    for k in bad:
+        et, gt = (expect_text or {}).get(k), (got_text or {}).get(k)
+        if et is not None and et == gt:
+            eol_only.append(k)
+        else:
+            real.append(k)
+    lines = [f'求解器源码与方案记录不一致（{len(bad)} 项）：' + '、'.join(bad[:5])]
+    if eol_only:
+        lines.append(
+            '  · 仅换行符不同、文本内容逐字一致（%d 项：%s）——代码没动，这是误报；'
+            '把换行改回 .gitattributes 规定的风格即可，不要刷新哈希'
+            % (len(eol_only), '、'.join(eol_only[:5])))
+    if real:
+        lines.append(
+            '  · 文本内容也已改变（%d 项：%s）——代码确有改动，方案记录必须作废，'
+            '重跑该阶段，不得刷新哈希'
+            % (len(real), '、'.join(real[:5])))
+    raise ValueError('\n'.join(lines))
 
 
 def validate_solution(sol):
@@ -358,6 +452,7 @@ def build_q2_solution(d, asg, m, order, info, seed, data_dir=None, code_dir=None
                     K_targets=[int(k) for k in info.get('K_targets', [])]),
         input_hashes=input_hashes(data_dir),
         solver_hashes=solver_hashes(Q2_SOLVER_FILES),
+        solver_text_hashes=solver_hashes_text(Q2_SOLVER_FILES),
         metrics={k: float(v) for k, v in m.items()},
         order=[int(i) for i in order],
         transport_trips=trips,
@@ -432,6 +527,7 @@ def build_q3_solution(d, q2_sol, assignment, relays, intervals, st_no, m,
         budget=dict(budget),
         input_hashes=input_hashes(data_dir),
         solver_hashes=solver_hashes(Q3_SOLVER_FILES),
+        solver_text_hashes=solver_hashes_text(Q3_SOLVER_FILES),
         # 指标里并非全是数：min_hard_margin_box 记的是「余量最小的那个货箱编号」
         # （如 S008-WAT-01），供正文点名用。一律 float() 会在导出的最后一步炸掉，
         # 前面十几分钟的求解全部白跑。数值项转 float，其余原样保留。

@@ -26,6 +26,17 @@ main.fdb_latexmk
 clean.bat
 常用LaTex代码指令.txt
 
+# === 智能体工作目录（不进提交包，也不进公开仓库）===
+# build_submission.py 的 SUPPORT 白名单只收 sections/figures/code/results，
+# 这四个目录本来就进不了支撑材料；列在这里是为了挡住 `git add .` 把它们一并
+# 扫进公开仓库——_ext/ 是外部方案的原样副本（他人代码，不宜转发），
+# _run_logs/ 与 _probe/ 是求解日志与探针输出，_legacy/ 是旧解备份。
+# 只忽略、不删除：它们仍在本地，需要时可随时取用。
+_ext/
+_probe/
+_run_logs/
+_legacy/
+
 # === Python 字节码缓存 ===
 __pycache__/
 *.py[cod]

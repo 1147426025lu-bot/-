@@ -16,7 +16,39 @@
 输出：figures/fig_roadmap.drawio（再由 render_drawio.py 渲染为 PNG/PDF）
 """
 import html
+import json
 import pathlib
+
+# ---------------------------------------------------------------- 图上数字的来源
+# 图里的数字一律从 results/paper_metrics.json 取，与正文同源。手写数字必然走味：
+# 本图曾长期写着问题一的 "63.18 kWh"，而正文与结果表早已改成 59.236——图重新
+# 生成时不会报错，只是把旧数原样再画一遍。现在缺指标或文件缺失一律直接停。
+_HERE = pathlib.Path(__file__).resolve().parent
+_METRICS = _HERE.parent / 'results' / 'paper_metrics.json'
+_M = None
+
+
+def _mv(name):
+    """取一个指标的数值（原样，不格式化）。"""
+    global _M
+    if _M is None:
+        if not _METRICS.exists():
+            raise SystemExit('缺 %s：请先运行各问求解脚本与 fill_results.py 生成指标；'
+                             '本脚本不接受手写数字。' % _METRICS)
+        _M = json.loads(_METRICS.read_text(encoding='utf-8'))
+    if name not in _M:
+        raise SystemExit('paper_metrics.json 缺指标 %s（图上数字必须与正文同源）' % name)
+    return _M[name]['value']
+
+
+def _num(name, nd=2):
+    """取数值并保留 nd 位小数。"""
+    return '%.*f' % (nd, float(_mv(name)))
+
+
+def _pct(name):
+    """取百分比：paper_metrics 里存的是 '66.18\\%' 这种带 LaTeX 转义的字符串。"""
+    return str(_mv(name)).replace('\\%', '').strip()
 
 # ---------------------------------------------------------------- 版式参数
 W = 816                 # 画布宽（压到 \textwidth=455pt 后，17px 字约 9.5pt）
@@ -95,7 +127,7 @@ BANDS = [
             ]},
             {'label': '方案权衡', 'boxes': [
                 '大区用 C\n小区用 B',
-                '18 架次\n63.18 kWh',
+                '%s 架次\n%s kWh' % (_mv('QoneTrips'), _num('QoneEnergy')),
             ]},
             # 数值取自 results/q1_sensitivity.csv：C 型均值 78.69 kg(ρ=0.10) → 52.71 kg(ρ=0.40)，
             # 即 ρ 每提升 10%，平均最大安全载荷下降 (78.69-52.71)/3 ≈ 8.7 kg。
@@ -120,8 +152,8 @@ BANDS = [
                 '离散事件调度',
             ]},
             {'label': '求解结果', 'boxes': [
-                '20 架次\n零违约',
-                '68.71 kWh\n8733 s',
+                '%s 架次\n零违约' % _mv('QtwoTrips'),
+                '%s kWh\n%d s' % (_num('QtwoEnergy'), round(float(_mv('QtwoMakespan')))),
             ]},
             {'label': '方案对比', 'boxes': [
                 'ε-约束扫描\nK≤20…40',
@@ -135,7 +167,9 @@ BANDS = [
             {'label': '直连判定', 'boxes': [
                 '轨迹分步采样',
                 '视线遮挡\n与链路预算',
-                '66.18% 直连\n33.82% 盲区',
+                # 口径与 q3_coverage.csv 一致（直连 / 中继 / 中断三项占比）。不写「盲区」：
+                # 这 33.82% 由中继覆盖，中断为 0（同带末栏），写成「盲区」会与之冲突。
+                '%s%% 直连\n%s%% 中继' % (_pct('QthreeDirect'), _pct('QthreeRelayFrac')),
             ]},
             {'label': '中继选址', 'boxes': [
                 '候选悬停点\n网格生成',
@@ -143,13 +177,13 @@ BANDS = [
                 '三站离地高度\n150/230/190m',
             ]},
             {'label': '中继调度', 'boxes': [
-                '中继 6 架次',
-                '4.96 kWh',
+                '中继 %s 架次' % _mv('QthreeRelays'),
+                '%s kWh' % _num('QthreeRelayEnergy'),
             ]},
             {'label': '零中断', 'boxes': [
                 '运输开始时刻\n入决策变量',
                 '中继链\n级联修复',
-                '中断\n0.00%',
+                '中断\n%s%%' % _pct('QthreeGap'),
             ]},
         ],
     },
@@ -163,16 +197,19 @@ BANDS = [
             ]},
             {'label': '任务分组', 'boxes': [
                 '受限增长串\n完全枚举',
-                '分区数\n63 / 301',
+                '分区数\n2047 / 86526',
             ]},
             {'label': '峰值并发', 'boxes': [
                 '分组独立执行',
                 '峰值资源需求',
             ]},
+            # 两种分组的不可行成因不同，这条带必须把它们分开写：K=3 的中继无人机是
+            # 结构性短缺（每个含失效区间的组至少占 1 架，3 组的下界 3 已超过库存 2），
+            # K=2 则不是任何单类短缺，纯粹来自「没有分区能同时取到八类最小值」的联合约束。
             {'label': '资源缺口', 'boxes': [
+                'K=3 中继\n结构性缺1架',
+                '其余各类\n非结构性缺',
                 '库存可行\n分区数为 0',
-                '中继机需求\n不少于组数 K',
-                'K=2 即缺\nB 机与中继机',
             ]},
         ],
     },

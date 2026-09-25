@@ -38,11 +38,12 @@ import time as _time
 from scipy.optimize import milp, LinearConstraint, Bounds
 from scipy import sparse
 from core import (T_DEC, E_DEC, load_data, ll_to_xy, segment_geometry, segment_time,
-                  relay_flight_time, relay_flight_energy, relay_hover_energy, charge_time)
+                  relay_flight_time, relay_flight_energy, relay_hover_energy, charge_time,
+                  box_index, weighted_tardiness, shifted_tardiness)
 from q2 import precompute_geometry, recommended, resource_usage
 from solution_io import (build_q3_solution, save_solution, load_solution,
                          inherit_trip_ids, check_foreign_keys, input_hashes,
-                         solver_hashes, Q2_SOLVER_FILES)
+                         solver_hashes, solver_hashes_text, Q2_SOLVER_FILES)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, '..', 'results')
@@ -60,6 +61,7 @@ MERGE_GAP = 900.0                     # 同一站相邻失效区间间隔≤此�
 MAX_JOB = 3600.0                      # 单个中继架次的服务时长上限(s)，防悬停能耗越限
 MARGIN_DB = 0.0                       # 覆盖判定所需最小链路裕量(dB)
 MAX_REPAIR_ROUNDS = 8                 # 就绪性修复环的最大轮数
+_V2_CHECKED = False                   # q3_v2 自检只跑一次（见 solve_relay 的并列路径）
 M_PER_DEG_LAT = 111132.95
 
 
@@ -350,6 +352,65 @@ def verify_pairs(d, intervals, cands, pairs, dt=DT_SEARCH):
     return bad
 
 
+_SEG_CACHE = {}      # (架次, 窗口, 起始, dt) → 区间内采样点的几何坐标
+_PAIR_OK = {}        # (架次, 窗口, 站坐标, dt) → 该 (区间, 站) 对是否真密度成立
+
+
+def _iv_segment(d, iv, dt):
+    """失效区间在给定步长下的采样点几何（去掉时刻），按区间缓存。
+
+    换站修复每轮要试上百个 (区间, 站) 对，而重采样一条完整轨迹是这个检查里最贵的
+    动作；不缓存就等于把重采样乘以候选站数。
+    """
+    key = (iv['trip'], round(iv['t_start'], 6), round(iv['t_end'], 6),
+           round(iv['assign']['start'], 6), dt)
+    seg = _SEG_CACHE.get(key)
+    if seg is None:
+        a = iv['assign']
+        t = d.transport_types[iv['type']]
+        pts = sample_trip_trajectory(d, t, a['route'], a['boxes_at'], t0=a['start'], dt=dt)
+        lo, hi = iv['t_start'], iv['t_end']
+        seg = [(p[1], p[2], p[3]) for p in pts if lo - 1e-6 <= p[0] <= hi + 1e-6]
+        if not seg:
+            seg = [(p[1], p[2], p[3]) for p in iv['pts']]
+        _SEG_CACHE[key] = seg
+    return seg
+
+
+def pair_covers(d, iv, cand, dt=DT_AUDIT):
+    """(区间, 站) 对在**真采样密度**下是否成立（区间内每一点都够接入裕量）。
+
+    `cover_matrix` 按 stride=5（≈10 s）抽点初判，只保证**抽点上**够裕量；选站 MILP
+    那条路有列生成式修复环按 DT_SEARCH 复核，而**换站修复 / 同时占站修复**是直接按
+    `cover[j]` 里的候选改派的，改派出来的对子从未复核过。实测 24 架次方案：换站修复
+    把 T06 的区间改派到 S02，抽点上全部通过，逐点看最小裕量 −1.20 dB，终检留下 213 s
+    真中断——正是这一处漏网。默认步长取 DT_AUDIT：1 s 的采样点集包含 2 s 的，故这一
+    条比 `verify_pairs` 还严，改派路径用得起（有区间级缓存）。
+    """
+    key = (iv['trip'], round(iv['t_start'], 6), round(iv['t_end'], 6),
+           cand['lon'], cand['lat'], cand['alt_abs'], dt)
+    hit = _PAIR_OK.get(key)
+    if hit is None:
+        st = _as_st(cand)
+        hit = all(access_margin(d, st, p[0], p[1], p[2]) >= MARGIN_DB
+                  for p in _iv_segment(d, iv, dt))
+        _PAIR_OK[key] = hit
+    return hit
+
+
+def sel_pairs_ok(d, intervals, cands, sel_new, sel_old, dt=DT_AUDIT):
+    """`sel_new` 相对 `sel_old` **改动过**的那些 (区间, 站) 对是否都过真密度复核。
+
+    只查改动过的对：没动的对子是上一轮已经查过的，重复查一遍等于把缓存白建。
+    """
+    for j, ci in sel_new.items():
+        if sel_old.get(j) == ci:
+            continue
+        if not pair_covers(d, intervals[j], cands[ci], dt=dt):
+            return False
+    return True
+
+
 def solve_setcover(n_iv, cover, ecost, n_cand, time_limit=120.0):
     """
     集合覆盖 MILP，两层字典序：
@@ -479,6 +540,181 @@ def peak_station_demand(win_by_station):
     return peak
 
 
+def min_stations_exact(cover, active, cache=None):
+    """
+    覆盖区间集合 `active` 所需的**最少候选站数**（精确，分支定界）。
+
+    `active` 是同一时刻全部处于失效中的区间下标。中继机悬停在一点只能充当一个
+    站，故这个数就是该时刻的**中继机数下界**——它与具体选站方案无关，只由几何
+    决定。先按可覆盖站数升序排，分支时优先钉死最难的那个区间，规模很小（同刻
+    最多 5 段）故不必上 ILP。
+    """
+    key = frozenset(active)
+    if cache is not None and key in cache:
+        return cache[key]
+    order = sorted(active, key=lambda j: len(cover[j]))
+    best = [len(order) + 1]
+
+    def rec(i, chosen):
+        if len(chosen) >= best[0]:
+            return
+        if i == len(order):
+            best[0] = len(chosen)
+            return
+        j = order[i]
+        if cover[j] & chosen:
+            rec(i + 1, chosen)
+            return
+        for c in cover[j]:
+            rec(i + 1, chosen | {c})
+
+    rec(0, frozenset())
+    if cache is not None:
+        cache[key] = best[0]
+    return best[0]
+
+
+def simultaneous_station_excess(win_by_iv, cover, n_relay, cache=None):
+    """
+    按时刻求「同时**必须**占用的悬停站数」超出中继机数的**超额站·秒**。
+
+    与 `peak_station_demand` 的关键区别：这里数的是**最少站数下界**
+    （`min_stations_exact`，在全部候选站上精确求解），而不是「当前选站方案里同时
+    被用到的站数」。后者只是某一个选站方案的性质，会把**并不存在**的峰值算进去：
+    本算例 t≈1027 s 处 4 段区间同时失效，现有选站方案占了 3 个站，但同一时刻只用
+    2 个站就能全覆盖。按方案计数时这个 3 一直挂在目标上，削峰于是整轮都在推一堵
+    推不动的墙——24 架次方案「峰值 3 → 3、0 个架次被推迟」就是这么来的。按下界
+    计数，超额只出现在真正需要 3 个站的时刻（本算例 t∈(3550.7, 3655.0)），
+    削峰的目标才与「2 架中继机能不能排得下」直接对应。
+
+    返回 (超额站·秒, 最少站数峰值)。
+    """
+    ev = []
+    for j, (t1, t2) in win_by_iv.items():
+        ev.append((t1, 1, j))
+        ev.append((t2, -1, j))
+    ev.sort(key=lambda x: (x[0], x[1]))
+    active = set()
+    excess, peak, prev_t, i = 0.0, 0, None, 0
+    while i < len(ev):
+        t = ev[i][0]
+        if prev_t is not None and active:
+            m = min_stations_exact(cover, active, cache)
+            peak = max(peak, m)
+            if m > n_relay:
+                excess += (t - prev_t) * (m - n_relay)
+        while i < len(ev) and ev[i][0] == t:
+            if ev[i][1] > 0:
+                active.add(ev[i][2])
+            else:
+                active.discard(ev[i][2])
+            i += 1
+        prev_t = t
+    return excess, peak
+
+
+def _concurrency_violations(intervals, sel, n_relay):
+    """
+    列出「同一时刻被占用的**悬停站**数超过中继机数」的时段，按超出量降序。
+
+    与 `simultaneous_station_excess` 的区别：那边问的是「几何上最少要几个站」，
+    与选站方案无关；这里问的是「**当前这组站**在那一刻被占用了几个」——MILP 给的
+    解未必就是最少站那组，而排班层只认当前这组站。
+    """
+    ev = []
+    for j, iv in enumerate(intervals):
+        ev.append((iv['t_start'], 1, j))
+        ev.append((iv['t_end'], -1, j))
+    ev.sort(key=lambda x: (x[0], x[1]))
+    out = []
+    active, prev, i = set(), None, 0
+    while i < len(ev):
+        t = ev[i][0]
+        if prev is not None and active:
+            used = {sel[j] for j in active if j in sel}
+            if len(used) > n_relay:
+                out.append(((t - prev) * (len(used) - n_relay), frozenset(active)))
+        while i < len(ev) and ev[i][0] == t:
+            if ev[i][1] > 0:
+                active.add(ev[i][2])
+            else:
+                active.discard(ev[i][2])
+            i += 1
+        prev = t
+    out.sort(key=lambda x: -x[0])
+    return out
+
+
+def enforce_concurrency(d, intervals, sel, cover, cands, n_relay,
+                        max_rounds=12, verbose=False):
+    """
+    同时占站约束修复：把「某一时刻被占用的悬停站数 > 中继机数」压回中继机数以内。
+
+    `solve_setcover` 只保证**覆盖**，不保证**同时占用**——它给出一组站，而某一时刻
+    真正被占用几个站，取决于那一刻有哪些区间落在这些站上。实测：t≈1027 s 有 4 段
+    区间同时失效，几何上 2 个站就能全覆盖，MILP 却选了 3 个（S01/S03/S04）。2 架
+    中继机在物理上排不出 3 个站同时中继，排班层只能把其中一个架次整趟推到几小时
+    之后——实测 T04 被推 7007.5 s，中断确实归零，代价是加权迟到 20 万：**可行但
+    畸形**。根因就在这一步，不修它，后面的修复环只能拿推迟量去补。
+
+    对每个超限时段，在该时段活跃区间的候选站并集里穷举 ≤n_relay 个站的组合，取
+    「修复后总超限秒数最小、其次改动区间数最少」的那组，把活跃区间改派过去。组合
+    规模很小（并集百来个站、2 站组合约一万），直接精确枚举。找不到可行组合的时段
+    原样保留，并在返回值里如实体现，不静默当成已修好。
+
+    返回 (新 sel, 修复前超限站·秒, 修复后超限站·秒)。
+    """
+    sel = dict(sel)
+    viol0 = sum(w for w, _ in _concurrency_violations(intervals, sel, n_relay))
+    viol_cur = viol0
+
+    def _cost(j, ci):
+        return relay_trip_cost(d, _as_st(cands[ci]),
+                               intervals[j]['t_end'] - intervals[j]['t_start'])['E']
+
+    for _ in range(max_rounds):
+        viols = _concurrency_violations(intervals, sel, n_relay)
+        if not viols:
+            break
+        _w, active = viols[0]
+        act = sorted(active)
+        hardest = min(act, key=lambda j: len(cover[j]))
+        best = None         # (总超限秒数, 改动区间数, 新 sel)
+        for c1 in sorted(cover[hardest]):
+            rest = [j for j in act if c1 not in cover[j]]
+            sets = [(c1,)] if not rest else []
+            if rest and n_relay >= 2:
+                inter = set(cover[rest[0]])
+                for j in rest[1:]:
+                    inter &= cover[j]
+                sets = [(c1, c2) for c2 in sorted(inter) if c2 != c1]
+            for S in sets:
+                sel2 = dict(sel)
+                for j in act:
+                    opts = [c for c in S if c in cover[j]]
+                    if not opts:
+                        break
+                    sel2[j] = min(opts, key=lambda c: _cost(j, c))
+                else:
+                    # 改派出来的新站必须过真密度复核：`cover[j]` 只是 stride=5 的抽点
+                    # 初判，抽点上够裕量不等于区间内每一点都够（见 pair_covers）。
+                    if not sel_pairs_ok(d, intervals, cands, sel2, sel):
+                        continue
+                    v = sum(w for w, _ in _concurrency_violations(intervals, sel2, n_relay))
+                    chg = sum(1 for j in act if sel2[j] != sel[j])
+                    key = (v, chg)
+                    if best is None or key < best[0]:
+                        best = (key, sel2)
+        if best is None or best[0][0] >= viol_cur - 1e-9:
+            break
+        sel = best[1]
+        viol_cur = best[0][0]
+    if verbose and viol0 > 1e-9:
+        print(f'  同时占站修复：超限 {viol0:.1f} → {viol_cur:.1f} 站·秒'
+              f'（中继机 {n_relay} 架）{"，已压到约束内" if viol_cur <= 1e-9 else "，仍有超限"}')
+    return sel, viol0, viol_cur
+
+
 def trip_slack(d, assignment):
     """每个架次在不违反**硬时限**前提下可向后推迟的最大秒数。"""
     slack = []
@@ -564,28 +800,27 @@ def chain_conflicts(d, assignment):
     return bad
 
 
-def cascade_shift(d, base_asg, deltas, req, slack, max_iter=400):
+def _propagate(d, base_asg, deltas, slack, max_iter=400):
     """
-    把最小推迟量沿**资源链**传播后落定。
+    从给定推迟量出发，沿资源链把冲突**只加不减**地推平。
 
     单架次后移常常不是被硬时限挡住，而是被「同一条无人机或共享电池链上的下一
     架次」顶住：本算例里 U08 的链是 T03→T14→T18、U06 的链是
     T04→T12→T16→T19，都首尾相接，动一个就必须连锁后移。故这里逐次只推「被压
-    住的那一架次」，推完重查，直到无冲突或再无可推空间（各自受自身硬时限
-    slack 约束，推不动就停下来如实报告，不硬凑）。
+    住的那一架次」，推完重查，直到无冲突、或再无可推空间。
+
+    「推不动」有两种，必须分清：下游那一架次自己的硬时限 slack 已经顶死（本算例
+    T24 只有 1344.5 s 余量），于是无论怎么推都会留下残余重叠。此时**如实**返回
+    ok=False 并把当前（仍冲突的）推迟量一并交出，由调用方决定是放弃这条动作还是
+    改走别的路；绝不在返回值里假装已无冲突。
 
     返回 (deltas, assignment, 是否已无冲突)。
     """
-    base_digest = asg_digest(base_asg)
     deltas = list(deltas)
-    for tr, need in req.items():
-        deltas[tr] = min(deltas[tr] + need, max(deltas[tr], slack[tr]))
     asg = shift_assignment(d, base_asg, deltas)
     for _ in range(max_iter):
         conf = chain_conflicts(d, asg)
         if not conf:
-            assert asg_digest(base_asg) == base_digest, \
-                '基线排班在本轮传播中被就地改动，所有推迟量都不可信'
             return deltas, asg, True
         applied = False
         for c in conf:
@@ -595,13 +830,70 @@ def cascade_shift(d, base_asg, deltas, req, slack, max_iter=400):
             deltas[j] += need
             applied = True
         if not applied:
-            assert asg_digest(base_asg) == base_digest, \
-                '基线排班在本轮传播中被就地改动，所有推迟量都不可信'
             return deltas, asg, False
         asg = shift_assignment(d, base_asg, deltas)
+    return deltas, asg, False
+
+
+def cascade_shift(d, base_asg, deltas, req, slack, max_iter=400):
+    """
+    在资源链上**能推多少推多少**地落定一组推迟量。
+
+    与 `_propagate` 的分工：`_propagate` 只会把冲突往后推平、对「推不动的」如实
+    报 False；本函数负责在推不动时**回退**——把请求的推迟量收小到链还能承受的
+    最大值，而不是「要么全额、要么一点不动」。
+
+    为什么必须回退（本项目实测踩过、代价是一个不可行解）：
+
+      T17 与 T24 同属 U05 且**首尾相接**（T17 返航时刻 = T24 起飞时刻），T24 的
+      硬时限 slack 只有 1344.5 s。而 T17 自身没有硬时限（slack = ∞），于是就绪性
+      修复给它要了 1173.3 s 的后移。旧版只在**循环里**检查下游 slack，请求值本身
+      不设链上上限，于是 T17 被推到 1583.0 s——比 T24 能承受的多 238.5 s。推不动
+      就留着重叠返回，而调用方 `repair_readiness` 对 ok=False 照单全收：终检只查
+      通信缺口、不查资源链，于是一架 U05 同时飞 T17 与 T24（重叠 1583 s）的方案
+      被当作「零中断」交付。这不是精度问题，是硬约束被静默违反。
+
+    回退用二分：可行集对增量单调（链上约束全是「下游不早于上游释放」），故
+    「增量 d 可行 ⇒ 任何 d' < d 可行」，可直接取最大的可行增量。δ=0 恒可行前提是
+    进来的 deltas 本身不冲突，故先做一次 `_propagate` 把关；那一步就不通过说明这
+    条动作从一开始就不可行，原样回 ok=False，不返回任何仍冲突的状态。
+
+    返回 (deltas, assignment, 是否可行且已无冲突)。
+    """
+    base_digest = asg_digest(base_asg)
+    cur, cur_asg, ok0 = _propagate(d, base_asg, deltas, slack, max_iter)
+    if not ok0:
+        assert asg_digest(base_asg) == base_digest, \
+            '基线排班在本轮传播中被就地改动，所有推迟量都不可信'
+        return list(deltas), shift_assignment(d, base_asg, deltas), False
+    for tr, need in req.items():
+        cap = max(cur[tr], slack[tr]) if np.isfinite(slack[tr]) else cur[tr] + need
+        target = min(cur[tr] + need, cap)
+        if target <= cur[tr] + 1e-9:
+            continue
+        trial = list(cur)
+        trial[tr] = target
+        t2, a2, ok = _propagate(d, base_asg, trial, slack, max_iter)
+        if ok:
+            # 常见情形：全额推得开，一次传播即可，不必二分。
+            cur, cur_asg = t2, a2
+            continue
+        lo, hi = cur[tr], target
+        best, best_asg = cur, cur_asg
+        for _ in range(12):                 # 12 次二分把区间收到全长的 1/4096
+            mid = 0.5 * (lo + hi)
+            trial = list(cur)
+            trial[tr] = mid
+            t2, a2, ok = _propagate(d, base_asg, trial, slack, max_iter)
+            if ok:
+                best, best_asg = t2, a2
+                lo = mid
+            else:
+                hi = mid
+        cur, cur_asg = best, best_asg
     assert asg_digest(base_asg) == base_digest, \
         '基线排班在本轮传播中被就地改动，所有推迟量都不可信'
-    return deltas, asg, False
+    return cur, cur_asg, True
 
 
 def _snapshot_intervals(intervals):
@@ -641,6 +933,37 @@ def _outage_proxy(intervals, relays, skipped):
     return tot, unbound
 
 
+def trip_damage(d, base_asg, deltas, idx=None):
+    """按**架次**汇总的加权迟到（权重·s），只统计「被推迟过且真的迟了」的架次。
+
+    与 `core.shifted_tardiness` 同源同口径（逐箱 优先系数 × max(0, 交付+位移−期望)），
+    区别只在分组：搜索需要知道**是哪一架次**在贡献迟到，而不只是总量。
+
+    缺了这一层，换站修复在缺口归零后就没有可排序的抓手，「缺口已归零」被当成收工
+    信号，被推出去几千秒的架次再也没人过问——实测 24 架次方案里 T04 推 7313.6 s、
+    独占 219447 加权迟到的绝大部分，而它的失效区间与 T05 的那段完全时间重叠、有
+    15 个共用候选站，改派过去就能并进同一趟悬停、零推迟。`expect` 为空（题面没给
+    期望送达时刻）的箱不计迟到，与 `weighted_tardiness` 一致。
+    """
+    idx = box_index(d) if idx is None else idx
+    out = {}
+    for k, dl in enumerate(deltas):
+        if dl <= 1e-9:
+            continue
+        w = 0.0
+        for boxes in base_asg[k]['boxes_at'].values():
+            for bx in boxes:
+                b = idx[bx['id']]
+                if b['expect'] is None:
+                    continue
+                late = base_asg[k]['deliver_abs'][bx['id']] + dl - b['expect']
+                if late > 1e-6:
+                    w += b['priority'] * late
+        if w > 1e-9:
+            out[k] = w
+    return out
+
+
 def reassign_stations(d, base_asg, intervals, sel, cands, cover, slack, deltas0, snap,
                       verbose=False, max_try=15):
     """
@@ -654,20 +977,68 @@ def reassign_stations(d, base_asg, intervals, sel, cands, cover, slack, deltas0,
     做法：反复按缺口从大到小取失效区间，逐个试它的替代站（按中继能耗升序），每组
     (sel, 推迟量) 都从原始状态整环重跑「合并 → 排班 → 就绪性修复」，用缺口代理
     量决定是否接受。代理量只用于相对比较，最终方案仍以 Δt=1 s 终检为准。
+
+    **缺口归零之后不停手**：同一个换站动作既能把缺口消掉，也能把「为了消缺口而被
+    推出去几千秒」的架次拉回来。判据仍是同一条字典序（无绑定数 → 缺口 → 加权迟到），
+    故损伤修复不可能拿通信可行性去换交付质量；缺口为 0 时它只会在同为 0 的解里挑
+    迟到更小的那个。焦点区间因此有两批：缺口最大的几段，和被推得最惨的几个架次。
     """
+    # 货箱索引与原始排班在本环里是常量，建一次传下去——搜索每轮要试几十个动作，
+    # 每次动作都要评一次迟到代价，重建索引会把这份开销乘以动作数。
+    idx = box_index(d)
+    # 邻接关系要按**错峰后**（即 snap 对应的）时刻判。搜索过程中 intervals 会随每轮
+    # 推迟整体平移，被推了 7000 s 的架次其失效区间早已远离当初与之重叠的那些段，
+    # 只看当前时刻就永远找不到「本可以同站合并」的邻居——T04 那类解的唯一入口正是
+    # 这里。函数入口处 intervals 恰好停在 snap 状态，本表取的就是那一刻。
+    snap_win = [(iv['t_start'], iv['t_end']) for iv in intervals]
+
     def attempt(sel_try, deltas_try):
         _reset_intervals(intervals, snap)
         relays, skipped, jobs, deltas, asg, rounds = repair_readiness(
             d, base_asg, intervals, sel_try, cands, deltas_try, slack, verbose=False)
         px, unbound = _outage_proxy(intervals, relays, skipped)
+        # 迟到按 attempt 真正产出的 deltas 算，不按动作带进来的下限算：就绪性修复
+        # 会在下限之上继续加推，最终落在哪只有跑完才知道。
+        w_tard = shifted_tardiness(d, base_asg, deltas, idx)[0]
+        # 资源链是否无冲突，是**排班是否成立**的前提，必须进判据：终检（audit）只
+        # 看通信分段，一架无人机同时飞两个架次在它眼里完全正常。实测正是这一层
+        # 缺失，让「零缺口 + 零迟到 + U05 同时飞 T17/T24」的解被选中并交付。
+        n_conf = len(chain_conflicts(d, asg))
         return dict(sel=dict(sel_try), deltas=deltas, asg=asg, relays=relays, skipped=skipped,
-                    jobs=jobs, rounds=rounds, px=px, unbound=unbound)
+                    jobs=jobs, rounds=rounds, px=px, unbound=unbound, w_tard=w_tard,
+                    n_conf=n_conf)
 
     def better(new, old, eps=1e-6):
-        """按 (无绑定区间数, 缺口秒数) 字典序判优——先保住「区间必须有中继绑定」。"""
+        """按 (资源链冲突处数, 无绑定区间数, 缺口秒数, 加权迟到) 字典序判优。
+
+        第一层是**可行性的前提**：排班里同一条无人机/电池链不得重叠，这一条不
+        成立时后面几层都无意义——一个「零缺口」的排班如果让一架无人机同时飞两个
+        架次，它不是更好的解，它根本不是解。故它排在最前。
+
+        其后两层是**硬**的：区间必须有中继绑定、且真的被盖住，这是题目对通信的要求，
+        迟到再小也不能拿它换。最后一层才是交付侧：同为「缺口已归零」的两个方案，
+        取迟到小的那个。
+
+        为什么必须补第三层：本环的候选动作里有「让位」——把占住中继机的那些架次
+        整体后移，好让缺口任务的窗口起点排到前面。挪哪个架次能腾出中继机，往往有
+        多种选法，而**它们对交付侧的影响可以差出几个数量级**：实测被选中的那个
+        动作把 T13（C 型，载 8 箱饮用水/应急食品）推后 5714.8 s，一家伙贡献了
+        加权迟到 223301 权重·s，而同一轮里另外四个被推的架次（T15/T14/T19/T11）
+        加起来是 0.0——它们的期望时刻本来就松。只比缺口时，这两种动作在判据里
+        长得一模一样。
+
+        只加这一层还不够：判据只有在**每个候选都被评过**之后才有意义。本轮已改为
+        全候选评估（见下方循环），否则第一个改善的动作仍会被顺序决定，第三层形同
+        虚设。另外这个量必须按「推迟之后」的交付时刻算，`shifted_tardiness` 早期
+        有一版忘了把位移加进去，于是每个候选都算出 0、判据永远判平。
+        """
+        if new['n_conf'] != old['n_conf']:
+            return new['n_conf'] < old['n_conf']
         if new['unbound'] != old['unbound']:
             return new['unbound'] < old['unbound']
-        return new['px'] < old['px'] - eps
+        if abs(new['px'] - old['px']) > eps:
+            return new['px'] < old['px'] - eps
+        return new['w_tard'] < old['w_tard'] - eps
 
     best = attempt(sel, list(deltas0))
     for it in range(max_try):
@@ -675,7 +1046,16 @@ def reassign_stations(d, base_asg, intervals, sel, cands, cover, slack, deltas0,
         # 两个来源：(a) 迟建链只盖住区间后半段、(b) 整段弃飞；而 (a) 根本不产生
         # any skipped 记录（实测本例 skipped 恒为 0、缺口全来自迟建链），照那个
         # 判据写会在第一轮直接退出，永远不去试任何替代站。
-        if best['px'] <= 1e-9:
+        #
+        # 但「缺口归零」本身**不是**收工信号。零中断只说明通信可行，交付侧可能已经
+        # 被就绪性修复推得面目全非——实测 24 架次方案里 T04 推 7313.6 s、独占
+        # 219447 加权迟到的绝大部分。旧版本在这里无条件 `break`，于是「零中断但高
+        # 迟到」的解一旦出现就再没有机会被换站修复碰过，哪怕它的失效区间与 T05 的
+        # 那段完全重叠、改派过去即可零推迟。判据改为：缺口归零**且**没有任何架次
+        # 在迟到，才停。缺口优先的字典序不变（见 better()），损伤动作只有在缺口同
+        # 为 0 时才可能被接受，故这一步不会用通信可行性换交付质量。
+        damage = trip_damage(d, base_asg, best['deltas'], idx)
+        if best['px'] <= 1e-9 and not damage:
             break
         # 按缺口从大到小列出所有有缺口的区间。只取 argmax 是不够的：argmax 那个
         # 区间可能压根没有可用替代站，此时应当退而试次大的，而不是整体放弃。
@@ -689,9 +1069,16 @@ def reassign_stations(d, base_asg, intervals, sel, cands, cover, slack, deltas0,
             gap = (iv['t_end'] - iv['t_start']) if c is None else max(0.0, c - iv['t_start'])
             if gap > 1.0:
                 gaps.append((gap, j))
-        if not gaps:
+        if not gaps and not damage:
             break
         gaps.sort(reverse=True)
+        # 本轮要动的区间：缺口最大的两段，加上「被推得最惨」的两个架次名下的区间。
+        # 两批都进候选，判据自己挑——有缺口时缺口动作必然更优（字典序第一层），
+        # 缺口归零后剩下的只有损伤动作。上限 6 段，免得候选表随缺口数线性膨胀。
+        focus = [j for _g, j in gaps[:2]]
+        for k, _w in sorted(damage.items(), key=lambda kv: -kv[1])[:2]:
+            focus += [j for j, iv in enumerate(intervals) if iv['trip'] == k]
+        focus = list(dict.fromkeys(focus))[:6]
 
         def e_key(j, ci):
             return relay_trip_cost(d, _as_st(cands[ci]),
@@ -708,7 +1095,7 @@ def reassign_stations(d, base_asg, intervals, sel, cands, cover, slack, deltas0,
         #   ③ **让位**：见下方注释——排班按窗口起点派发，顺序不是决策变量，于是
         #      缺口任务会被同一条中继链上「窗口起点更早」的任务挡在后面。
         moves = []
-        for worst_gap, worst_j in gaps[:2]:
+        for worst_j in focus:
             cur = best['sel'].get(worst_j)
             for ci in sorted((c for c in cover[worst_j] if c != cur),
                              key=lambda c: e_key(worst_j, c))[:3]:
@@ -735,6 +1122,63 @@ def reassign_stations(d, base_asg, intervals, sel, cands, cover, slack, deltas0,
                     if sel2 != best['sel']:
                         moves.append((f'{names}→站{ci}', sel2, list(deltas0)))
 
+        #   ④ **同站合并（跨架次）**：缺口区间等不到中继机，常常不是「没有站能覆盖
+        #      它」，而是「覆盖它的站与同时段那段区间占的站不是同一个」——只有 2 架
+        #      中继机时，同一时刻占用 3 个不同悬停站本身就是不可行，与被占的站是谁
+        #      无关。①②看不到这一层：①按**单区间**的中继能耗排序取前 3 个候选，
+        #      ②只在同一架次内找共站，而同时段冲突完全可能来自另一个架次。
+        #      实测死结：24 架次方案里 T14 与 T15 的失效区间重叠 595 s，而
+        #      |cover[T14] ∩ cover[T15]| = 0——这两段必须由两个不同的站保障；
+        #      缺口那段 T16 却与 T14 有 5 个共用站、与 T15 有 2 个共用站，即
+        #      「与相邻区间同站」本可把同时占站数从 3 压回 2，但逐区间搜索按单区间
+        #      能耗取候选，永远取不到那几个共用站。故这里显式枚举共用站。
+        #      多列候选只是多花时间，判据仍是 attempt 跑完的真值，不放宽任何标准。
+        #
+        #      **续驻那一半**：上面只讲「同一时刻」。还有一类同样看不见的冲突是
+        #      「**先后**占住同一架中继机」：缺口区间等不到中继机，是因为前一段先把
+        #      它钉在另一个站上了。若某个站同时覆盖两段、而两段间隔 ≤ MERGE_GAP，
+        #      `merge_jobs` 会把它们并成**一个**中继架次——中继机不必返航、不必转场，
+        #      一次悬停把两段都保障掉，冲突自然消失。故判据从「时间重叠」放宽到
+        #      「间隔 ≤ MERGE_GAP」（时间重叠是间隔为负的特例），枚举方式不变。
+        #      实测死结（本算例当前唯一残留缺口）：G11(T16, 站 S02, 3056–3917 s)
+        #      晚建链 793.9 s，根因是 G06(T11, 站 S01, 2130–2552 s) 把 R02 钉在 S01
+        #      直到 2552 s，返航 3030 s、再转场到 S02 建链已是 3850 s——固定开销
+        #      1298 s 无从压缩。而 |cover[G06] ∩ cover[G11]| > 0 且两段间隔 504 s
+        #      ≤ MERGE_GAP：把 G06 改派到 S02，R02 从 2130 s 一直悬停到 3917 s 即可，
+        #      代价仅是 T11 后移 404 s（其硬时限 slack 为无穷），由就绪性修复环补上。
+        for worst_j in focus:
+            ivj = intervals[worst_j]
+            a1, b1 = snap_win[worst_j]
+            for j2, iv2 in enumerate(intervals):
+                if j2 == worst_j:
+                    continue
+                # 时间重叠（间隔<0，同时占站的冲突）与近邻（间隔≤MERGE_GAP，
+                # 先后占同一架中继机的冲突）都要枚举；更远的间隔合并不成一个架次。
+                gap12 = max(iv2['t_start'] - ivj['t_end'],
+                            ivj['t_start'] - iv2['t_end'])
+                # 再按错峰后（snap）的时刻判一次。当前时刻与 snap 时刻在搜索早轮
+                # 就已经分叉：被就绪性修复推走的架次，其区间按当前时刻看已经没邻居，
+                # 而它当初与谁重叠是确定的。两套时刻取**更近**的那个，故候选集是
+                # 旧版的超集，不存在「换掉一个好候选」的风险。
+                a2, b2 = snap_win[j2]
+                gap12 = min(gap12, max(a2 - b1, a1 - b2))
+                if gap12 > MERGE_GAP:
+                    continue
+                common = cover[worst_j] & cover[j2]
+                if not common:
+                    continue
+                for ci in sorted(common, key=lambda c: e_key(worst_j, c))[:2]:
+                    # a) 只把缺口区间挪到对方的站；b) 两段一起挪到共用站
+                    for both in (False, True):
+                        sel2 = dict(best['sel'])
+                        sel2[worst_j] = ci
+                        if both:
+                            sel2[j2] = ci
+                        if sel2 != best['sel']:
+                            tag = ('G%02d+G%02d' % (worst_j + 1, j2 + 1) if both
+                                   else 'G%02d→G%02d 之站' % (worst_j + 1, j2 + 1))
+                            moves.append((f'{tag}→站{ci}', sel2, list(deltas0)))
+
         # ③ 让位：schedule_relays 是按**窗口起点**依次派发的，顺序不是决策变量。
         # 于是「同一条中继链上更早的那个任务」会先占住中继机，缺口任务只能等它飞完
         # 一整趟（去程 + 服务 + 返航 + 周转）才轮得到——这正是 G15 的死结：R02 先去
@@ -744,7 +1188,7 @@ def reassign_stations(d, base_asg, intervals, sel, cands, cover, slack, deltas0,
         # 越过缺口任务的窗口起点，t1 排序自然翻转，缺口任务就排到了前面。这里直接
         # 给这些架次一个**推迟下限**（repair_readiness 只会在此基础上再加，不会减），
         # 余下由就绪性修复环自己收敛。是否让得开由硬时限 slack 把关，让不开就跳过。
-        for worst_gap, worst_j in gaps[:1]:
+        for _g1, worst_j in gaps[:1]:
             t1j = intervals[worst_j]['t_start']
             riders = [x for x in best['relays'] if worst_j in x['ivs']]
             if not riders:
@@ -768,20 +1212,63 @@ def reassign_stations(d, base_asg, intervals, sel, cands, cover, slack, deltas0,
                         break
                 if not ok:
                     continue
+                # 逐架次 slack 只保证「自己不被硬时限挡住」，管不了链上后一架次。
+                # 让位动辄几千秒（实测 T17 被要求后移 1583 s，而同链的 T24 只有
+                # 1344.5 s 余量），不在这里先走一遍级联，这条动作会带着一个推不平
+                # 的排班进入 attempt，最终变成一架无人机同时飞两个架次。级联只可能
+                # 再往后推，不会把 need 变小，故上面那条硬时限检查仍然必要。
+                d2, _asg2, ok2 = cascade_shift(d, base_asg, d2, {}, slack)
+                if not ok2:
+                    continue
                 names = '+'.join(sorted({f'T{intervals[j2]["trip"]+1:02d}'
                                          for j2 in blk['ivs']}))
                 moves.append((f'让位：{names} 后移 ≥{need:.0f}s 以腾出 {rid}',
                               dict(best['sel']), d2))
 
-        improved = False
+        # **全部候选都评完再取最优**，不再「遇到第一个改善就 break」。
+        #
+        # 原来是取第一个改善的动作。加进第三层判据（加权迟到）之后这就不成立了：
+        # 「让位 T14+T16 腾出 R02」把 T13 推后 5714.8 s、独占全部 223301 加权迟到，
+        # 而同一轮里别的候选可能是零迟到的，但第一个改善的位置由列表顺序决定，
+        # 判据再好也没机会比较。
+        #
+        # 试过用「按动作自带推迟下限估的迟到」排序把好的动作挪到前面——**没用**：
+        # 那个估计只知道动作自己的下限，而真实损伤来自就绪性修复在其上的继续传播
+        # （让位动作的 d2 只含 T14/T16，5714.8 s 是修复环后来加给 T13 的），所以
+        # 每个候选估出来都是 0，排序是空操作。能分辨好坏的只有跑完 attempt 的真值。
+        #
+        # 代价可忽略：attempt 的主体内是 repair_readiness，实测单次 0.02 s、
+        # 一轮十余个候选，合计零点几秒（本函数所在 solve_relay 总耗时约 158 s）。
+        # 尾部本就从 snap 重放 best['asg'] 复原状态，故多跑几个候选不影响最终一致性。
+        # 改派出来的新 (区间, 站) 对必须过真密度复核，与同时占站修复同一道关。
+        # `cover[j]` 来自 stride=5 的抽点初判，抽点上够裕量不等于逐点都够——实测漏网
+        # 的一例正是本环：T06 改派到 S02 后抽点全过、逐点最小裕量 −1.20 dB，终检
+        # 留下 213 s 真中断。过滤器只可能剔除候选，不会放宽任何判据。
+        moves = [(tag, sel2, d2) for (tag, sel2, d2) in moves
+                 if sel_pairs_ok(d, intervals, cands, sel2, best['sel'])]
+
+        # 两套时刻（当前 / snap）可能给出同一动作，按标签去重：标签由
+        # (缺口区间, 对方区间, 候选站, 是否两段同移) 唯一决定，同标签必同 sel2。
+        # 只省一次 attempt 的开销，不动候选集合。
+        _seen, _uniq = set(), []
+        for tag, sel2, d2 in moves:
+            if tag in _seen:
+                continue
+            _seen.add(tag)
+            _uniq.append((tag, sel2, d2))
+        moves = _uniq
+
+        improved, best_tag = False, None
         for tag, sel2, d2 in moves:
             r = attempt(sel2, d2)
             if better(r, best):
-                best, improved = r, True
-                if verbose:
-                    print(f'  换站修复第 {it+1} 轮：{tag}，'
-                          f'缺口 {best["px"]:.0f} s、无绑定 {best["unbound"]} 个')
-                break
+                best, improved, best_tag = r, True, tag
+        if improved and verbose:
+            print(f'  换站修复第 {it+1} 轮：{best_tag}，'
+                  f'缺口 {best["px"]:.0f} s、无绑定 {best["unbound"]} 个、'
+                  f'加权迟到 {best["w_tard"]:.0f}'
+                  f'（{len(moves)} 个候选中选优'
+                  f'{"，本轮为缺口归零后的交付修复" if best["px"] <= 1e-9 and gaps else ""}）')
         if not improved:
             if verbose:
                 print(f'  换站修复：{len(moves)} 个候选动作均无改善，停止')
@@ -846,6 +1333,15 @@ def repair_readiness(d, base_asg, intervals, sel, cands, deltas, slack,
             return relays, skipped, jobs, deltas, assignment, rnd
 
         cand, asg2, ok = cascade_shift(d, base_asg, deltas, req, slack)
+        if not ok:
+            # 进来的推迟量本身就沿资源链推不平（调用方按逐架次 slack 拼出的下限
+            # 只保证「自己不被硬时限挡住」，不保证链上下一架次还接得住）。此时
+            # 唯一正确的动作是**原地停手**：继续走下去等于把一个无人机同时飞两
+            # 架次的排班当成可行解交出去，而终检只查通信缺口、查不到这一层。
+            if verbose:
+                print(f'  就绪性修复：第 {rnd+1} 轮的推迟量沿资源链推不平，'
+                      f'放弃本轮（仍有 {len(req)} 个任务需要后移）')
+            return relays, skipped, jobs, deltas, assignment, rnd
         if cand == deltas:
             if verbose:
                 print(f'  就绪性修复：第 {rnd+1} 轮推不动了'
@@ -855,57 +1351,77 @@ def repair_readiness(d, base_asg, intervals, sel, cands, deltas, slack,
         _apply_shift(intervals, assignment)
         if verbose:
             print(f'  就绪性修复第 {rnd+1} 轮：{len(req)} 个任务需后移，'
-                  f'{sum(1 for i in range(len(deltas)) if deltas[i] > 0)} 个架次已推迟'
-                  f'{"，资源链仍冲突" if not ok else ""}')
+                  f'{sum(1 for i in range(len(deltas)) if deltas[i] > 0)} 个架次已推迟')
     jobs = merge_jobs(intervals, sel)
     relays, skipped = schedule_relays(d, jobs, cands, verbose=False)
     return relays, skipped, jobs, deltas, assignment, max_rounds
 
 
-def stagger(d, assignment, dead_of_trip, slack, verbose=False):
+def stagger(d, assignment, dead_of_trip, slack, cover, verbose=False):
     """
     错峰：把运输架次开始时刻作为决策变量（只允许向后推迟，不早于 Q2 的资源可用
-    时刻），目标是最小化同时中继需求峰值——2 架中继是硬瓶颈，削峰是零中断的
-    关键。可行性只在两处把关：所有箱的硬时限不得违反；无人机与共享电池的占用
-    区间不得重叠（复用 q2.resource_usage 的口径，不另写一份）。
+    时刻），目标是让「同时**必须**占用的悬停站数」不超过中继机数——2 架中继是硬
+    瓶颈，削峰是零中断的关键。可行性只在两处把关：所有箱的硬时限不得违反；无人机
+    与共享电池的占用区间不得重叠（复用 q2.resource_usage 的口径，不另写一份）。
 
-    返回 (新 assignment, 位移列表, 峰值前, 峰值后)。
+    目标函数用**超额站·秒**（`simultaneous_station_excess`）而不是全局峰值：
+    本算例里峰值 3 同时出现在 t≈1027 s 与 t≈3603 s 两处，前者只是当前选站方案
+    多占了一个站（同一时刻 2 个站就够），后者才是真的排不下。用全局峰值当目标时，
+    把后者削掉峰值仍是 3、判据看不出改善，搜索于是停在原地；超额站·秒只惩罚真
+    正无解的那 104 s，改善方向与「2 架中继机够不够」完全一致。
+
+    推迟一律经 `cascade_shift` 沿资源链传播后再评估，而不是一遇冲突就否决：本
+    算例正是 T17 被同链的后续架次顶住，单架次后移全部被 `chain_conflicts` 拦下，
+    而它只需后移 104 s 就能让 G12 完全错开 G10。
+
+    返回 (新 assignment, 位移列表, 超额站·秒前, 超额站·秒后, 峰值前, 峰值后)。
     """
 
-    def peak_of(asg):
-        win = {}
-        for k, a in enumerate(asg):
-            base = a['start'] - assignment[k]['start']
-            for (ci, t1, t2) in dead_of_trip[k]:
-                win.setdefault(ci, []).append((t1 + base, t2 + base))
-        return peak_station_demand(win)
+    n_relay = len(d.relay_uavs) if getattr(d, 'relay_uavs', None) else 2
+    _cache = {}
+    # 区间与站的绑定关系固定（选站由上层决定，错峰只动时刻），先把失效区间压平成
+    # 一张 (架次, 站, 起, 止) 表并编上全局序号，`obj_of` 只需按位移量平移时刻。
+    iv_tab = [(k, ci, t1, t2)
+              for k, lst in enumerate(dead_of_trip) for (ci, t1, t2) in lst]
 
-    p0 = peak_of(assignment)
+    def obj_of(asg):
+        by_iv = {}
+        for j, (k, _ci, t1, t2) in enumerate(iv_tab):
+            base = asg[k]['start'] - assignment[k]['start']
+            by_iv[j] = (t1 + base, t2 + base)
+        return simultaneous_station_excess(by_iv, cover, n_relay, _cache)
+
+    p0, pk0 = obj_of(assignment)
     deltas = [0.0] * len(assignment)
     cur = list(assignment)
-    p_cur = p0
+    p_cur, pk_cur = p0, pk0
     caps = [min(sl, 1800.0) if np.isfinite(sl) else 1800.0 for sl in slack]
     grid = [30.0, 60.0, 120.0, 240.0, 480.0, 900.0, 1800.0]
     for k in sorted(range(len(assignment)), key=lambda i: -len(dead_of_trip[i])):
-        best_dl, best_p = 0.0, p_cur
+        if not dead_of_trip[k]:
+            continue
+        best_key, best_delta = (p_cur, pk_cur), None
         for dl in grid:
             if dl > caps[k] + 1e-9:
                 break
             trial = list(deltas)
             trial[k] = dl
-            asg2 = shift_assignment(d, assignment, trial)
-            if chain_conflicts(d, asg2):
+            d2, asg2, ok = cascade_shift(d, assignment, trial, {k: dl}, slack)
+            if not ok:
                 continue
-            p2 = peak_of(asg2)
-            if p2 < best_p - 1e-9:
-                best_p, best_dl = p2, dl
-        deltas[k] = best_dl
-        cur = shift_assignment(d, assignment, deltas)
-        p_cur = best_p
+            key2 = obj_of(asg2)
+            if key2 < best_key:
+                # 接受的是**级联后**的整组位移，不是单独一个 dl：若只记 dl 而丢掉
+                # 沿资源链传播出来的部分，落定的排班仍会在链上冲突。
+                best_key, best_delta = key2, d2
+        if best_delta is not None:
+            deltas = list(best_delta)
+            cur = shift_assignment(d, assignment, deltas)
+        p_cur, pk_cur = best_key
     if verbose:
-        print(f'错峰: 同时中继需求峰值 {p0} → {p_cur}'
-              f'（共 {int(sum(1 for x in deltas if x > 0))} 个架次被推迟）')
-    return cur, deltas, p0, p_cur
+        print(f'错峰: 超额站·秒 {p0:.1f} → {p_cur:.1f}，同时所需悬停站峰值 '
+              f'{pk0} → {pk_cur}（共 {int(sum(1 for x in deltas if x > 0))} 个架次被推迟）')
+    return cur, deltas, p0, p_cur, pk0, pk_cur
 
 
 # ===========================================================================
@@ -1227,17 +1743,89 @@ def solve_relay(d, assignment, greedy=False, single_hover=False, verbose=True):
             doft[intervals[j]['trip']].append((ci, intervals[j]['t_start'], intervals[j]['t_end']))
         slack = trip_slack(d, assignment)
         base_asg = assignment        # 累计推迟量一律相对这个基准重算
-        assignment, deltas, peak0, peak1 = stagger(d, assignment, doft, slack, verbose=verbose)
+        assignment, deltas, exc0, exc1, peak0, peak1 = stagger(
+            d, assignment, doft, slack, cover, verbose=verbose)
         _apply_shift(intervals, assignment)
-        # 削峰只治「峰值超过中继机数」；峰值没超但中继机届时没飞到位的，交给下面两级修复：
+        # 6b) 同时占站约束修复。必须排在错峰**之后**：错峰先把「几何上同时要 3 个站」
+        # 的时段消掉（本算例 104.3 s），几何下界落到中继机数以内，这一步才可能把
+        # **当前这组站**的同时占用也压进去；排在错峰前则会对着一个本就无解的时段修。
+        sel, viol0, viol1 = enforce_concurrency(
+            d, intervals, sel, cover, cands, len(d.relay_uavs), verbose=verbose)
+        if viol1 < viol0 - 1e-9:
+            # 改派后新启用的站没做过第 5 步的连续精化，补一次（同一套坐标下降）。
+            sel_stations = {}
+            for j, ci in sel.items():
+                sel_stations.setdefault(ci, []).append(j)
+            for ci, js in sel_stations.items():
+                pts = [p for j in js for p in intervals[j]['pts']]
+                cands[ci], _m = refine_station(d, cands[ci], pts)
+        # 削峰只治「同时所需悬停站数超过中继机数」；没超但中继机届时没飞到位的，交给下面两级修复：
         #   ① 就绪性修复（沿资源链级联后移运输架次，受硬时限 slack 把关）
         #   ② 换站修复（①顶死硬时限时改换「中继届时真在位」的站，补集合覆盖看不见的维度）
         # snap 必须取在 _apply_shift **之后**：repair_readiness 的轮 0 直接拿当前
         # intervals 去 merge_jobs，即它假定 intervals 的状态与传入的 deltas 对应，
         # 而各次 attempt 传的都是错峰后的 deltas，故基准快照就是错峰后的状态。
         snap = _snapshot_intervals(intervals)
-        sel, deltas, assignment, relays, skipped, jobs, repair_rounds = reassign_stations(
+        sel_a, deltas_a, asg_a, relays_a, skipped_a, jobs_a, repair_rounds = reassign_stations(
             d, base_asg, intervals, sel, cands, cover, slack, deltas, snap, verbose=verbose)
+        snap_a = _snapshot_intervals(intervals)
+        # 旧分支的缺口代理必须在 intervals 还停在 snap_a 状态时取（此刻正对应 relays_a）
+        px_a = _outage_proxy(intervals, relays_a, skipped_a)
+
+        # 并列路径：固定点迭代错峰（阶段 11 移植，见 q3_v2 的模块说明）。
+        # 两条路都跑完再择优，旧路（上面这段）原地保留、逐位可复现。
+        #
+        # 择优判据必须用**缺口代理**打头，而不是「弃飞架次数」：`schedule_relays` 允许
+        # 中继晚于区间起点到场（只把迟到记在 `late` 上），此时区间早段无人保障，而
+        # 弃飞数为 0。实测正是这个差异：固定点解弃飞 0 却留下 4.22% 的真实中断。
+        # 代理的两个量与 `_outage_proxy` 的说明一致，按 (无绑定区间数, 缺口秒数) 优先，
+        # 其后才是「少推一点、早干完、少耗电」。
+        sel, deltas, assignment, relays, skipped, jobs, repair_rounds = (
+            sel_a, deltas_a, asg_a, relays_a, skipped_a, jobs_a, repair_rounds)
+        _reset_intervals(intervals, snap)
+        # 站址选择两条路共用（都用旧分支选出的 sel），故本次对照隔离出的正是
+        # 「错峰/推迟策略」这一项，不含选站差异。
+        global _V2_CHECKED
+        try:
+            import q3_v2
+            if not _V2_CHECKED:
+                q3_v2.self_check(d, base_asg, intervals, sel, cands, verbose=verbose)
+                _V2_CHECKED = True
+            r2 = q3_v2.solve_joint_v2(d, base_asg, intervals, sel, cands, slack,
+                                      verbose=verbose)
+        except Exception as e:                      # noqa: BLE001
+            r2 = None
+            print(f'  [v2 固定点] 未产出结果（{type(e).__name__}: {e}），沿用旧分支')
+        if r2 is None:
+            _reset_intervals(intervals, snap_a)
+        else:
+            px2 = _outage_proxy(intervals, r2['relays'], r2['skipped'])
+
+            def _key(px, dl, asg, rls):
+                done = max([x['return_t'] for x in rls], default=0.0)
+                done = max(done, max((a['start'] + a['duration'] for a in asg), default=0.0))
+                # 第三元由「累计推迟量」换成**加权迟到**：推迟量不是收益函数，
+                # 推一个期望时刻很松的架次代价是 0、推一个很紧的代价是 优先系数×迟到秒，
+                # 两者在 Σ推迟量 里长得一模一样。随后是完工、能耗，末位才是推迟量
+                # （都无迟到时，少推一点仍是更干净的解）。
+                return (px[1], round(px[0], 6), round(weighted_tardiness(d, asg)[0], 6),
+                        round(done, 6), round(sum(x['E'] for x in rls), 9),
+                        round(sum(dl), 6))
+            k1 = _key(px_a, deltas_a, asg_a, relays_a)
+            k2 = _key(px2, r2['deltas'], r2['assignment'], r2['relays'])
+            tag = (f'缺口 {k2[1]:.0f}s/无绑定 {k2[0]}、加权迟到 {k2[2]:.0f}、累计推迟 '
+                   f'{sum(r2["deltas"]):.0f} s、联合完工 {k2[3]:.0f} s、中继能耗 '
+                   f'{sum(x["E"] for x in r2["relays"]):.3f} kWh；'
+                   f'旧：缺口 {k1[1]:.0f}s/无绑定 {k1[0]}、加权迟到 {k1[2]:.0f}、'
+                   f'累计推迟 {sum(deltas_a):.0f} s、联合完工 {k1[3]:.0f} s')
+            if k2 < k1:
+                deltas, assignment = r2['deltas'], r2['assignment']
+                relays, skipped, jobs = r2['relays'], r2['skipped'], r2['jobs']
+                repair_rounds += r2['rounds']
+                print(f'  [v2 固定点] 采用（{r2["reason"]}）：{tag}')
+            else:
+                _reset_intervals(intervals, snap_a)
+                print(f'  [v2 固定点] 未采用（{r2["reason"]}）：{tag}')
     else:
         jobs = merge_jobs(intervals, sel)
         relays, skipped = schedule_relays(d, jobs, cands, verbose=verbose)
@@ -1252,15 +1840,29 @@ def solve_relay(d, assignment, greedy=False, single_hover=False, verbose=True):
     over_H = [x for x in relays if x['hover_agl'] > rt['max_hover_alt'] + 1e-9]
     if over_E or over_H:
         raise RuntimeError('中继架次越限：能耗 %d 个、悬停高度 %d 个' % (len(over_E), len(over_H)))
+    # 运输侧资源链自检：同一条无人机/共享电池链上不得有占用重叠。这一条是**硬约束**，
+    # 而 `audit()` 只看通信分段、看不见它——实测正是这里缺一道关，让「U05 同时飞
+    # T17 与 T24（重叠 1583 s）」的排班以「零中断」的名义落了盘，最后由画图脚本
+    # `figures_adv.py` 的重建占用断言（`assert n_ov == 0`）才暴露出来。求解器自己
+    # 必须先卡住，而不是等下游脚本替它把关。
+    conf = chain_conflicts(d, assignment)
+    if conf:
+        print('!' * 74)
+        print('资源链冲突：错峰方案仍有 %d 处无人机/电池占用重叠，方案不可行。' % len(conf))
+        for c in conf[:5]:
+            print('  %s：T%02d → T%02d 需再推 %.1f s（对方硬时限余量 %.1f s）'
+                  % (c['resource'], c['prev'] + 1, c['nxt'] + 1,
+                     c['required_delay'], trip_slack(d, assignment)[c['nxt']]))
+        raise RuntimeError('错峰方案存在 %d 处资源链冲突，不得作为可行解交付' % len(conf))
 
-    # ok=True 的含义仅限于「选站可行、中继架次不越限、排班已给出」。它**不是**
-    # 交付侧的可行证书：硬时限是否满足、加权迟到多少、能耗合计几何，都要由调用方
-    # 在最终错峰方案上重算（见 main 里的 F05 汇总）。把它们当成 ok 的推论会漏检。
+    # ok=True 的含义仅限于「选站可行、中继架次不越限、资源链无冲突、排班已给出」。
+    # 它**不是**交付侧的可行证书：硬时限是否满足、加权迟到多少、能耗合计几何，都要
+    # 由调用方在最终错峰方案上重算（见 main 里的 F05 汇总）。当成 ok 的推论会漏检。
     return dict(ok=True, intervals=intervals, cands=cands, sel=sel, relays=relays,
                 skipped=skipped, assignment=assignment, deltas=deltas,
                 peak0=peak0, peak1=peak1, uncovered=uncovered, cover=cover,
-                repair_rounds=repair_rounds, secs=_time.time() - t0,
-                certificate='选站/排班可行，不含交付侧指标')
+                repair_rounds=repair_rounds, secs=_time.time() - t0, n_conf=0,
+                certificate='选站/排班可行（含资源链无冲突），不含交付侧指标')
 
 
 def uncovered_note(uncovered):
@@ -1277,9 +1879,13 @@ def main():
     # 复用问题二推荐方案（q2.py 实跑后落盘于 results/q2_recommended.json）
     trips, assignment, q2_m, q2_order = recommended(d)
     # 上游**完整方案**：数据/代码哈希必须与落盘时一致，否则这份上游已过期
+    # 一并给文本规范化哈希：源码字节不一致时，加载器才能分辨「只是换行被改了」
+    # 与「代码真改了」，并各自给出正确处置。缺这一项时两种原因混成一句
+    # 「求解器源码已变」，读者只能靠刷新哈希蒙混过去。
     q2_sol = load_solution(Q2_SOL, stage='q2',
                            input_hashes_expect=input_hashes(),
-                           solver_hashes_expect=solver_hashes(Q2_SOLVER_FILES))
+                           solver_hashes_expect=solver_hashes(Q2_SOLVER_FILES),
+                           solver_text_hashes_expect=solver_hashes_text(Q2_SOLVER_FILES))
     assignment = sorted(assignment, key=lambda x: x['start'])
     assignment = [dict(a, trip_idx=i) for i, a in enumerate(assignment)]
     # 架次编号**继承**上游方案，并逐架次核对指派未被重解改写
@@ -1351,7 +1957,11 @@ def main():
     # build_q3_solution 造出来，此处引用它只会拿到一个未绑定的名字。两者同源——
     # build_q3_solution 的 transport_trips 正是逐字段抄自这个 assignment。
     idx_box = {b['id']: b for bs in d.boxes_by_service.values() for b in bs}
-    w_tard, n_late, max_late = 0.0, 0, 0.0
+    # 加权迟到只留一份实现（core.weighted_tardiness）。此前这里与搜索里的退火路径
+    # 各写一遍同一个公式，两处一旦有一处改了就是"同一指标两个值"；口径归一到
+    # core 后，本文件只负责把结果落盘。verify.py 里**另有**一份独立重算——那是
+    # 刻意保留的第二实现，不复用 core，用作复核。
+    w_tard, n_late, max_late = weighted_tardiness(d, assignment, idx_box)
     min_margin = float('inf')
     min_margin_box = ''
     for t in assignment:
@@ -1360,12 +1970,6 @@ def main():
                 bid = bx['id']
                 b = idx_box[bid]
                 t_del = t['deliver_abs'][bid]
-                if b['expect'] is not None:
-                    late = max(0.0, t_del - b['expect'])
-                    if late > 1e-6:
-                        n_late += 1
-                        max_late = max(max_late, late)
-                    w_tard += b['priority'] * late
                 lim = []
                 if b['category'] == '医疗物资' and b['expect'] is not None:
                     lim.append(b['expect'])

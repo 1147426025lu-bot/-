@@ -480,6 +480,69 @@ def roundtrip_energy(t, dem, O01, si, q_out):
 
 
 # ---------------------------------------------------------------------------
+# 3b 交付侧口径（加权迟到）——**求解侧唯一实现**
+# ---------------------------------------------------------------------------
+# 这个口径原来在 code/q3.py 的 F05 汇总里现算一遍。搜索侧也要用它（错峰/换站
+# 的择优必须看得见迟到代价），若在搜索里再抄一份，就会有两个"同一个指标"的
+# 实现，改一处忘一处时论文里的数就和搜索实际在优化的目标对不上。故收到这里，
+# 求解侧只此一份。
+#
+# 独立复核侧**不**调本函数：verify.py 从导出 CSV（逐箱交付表 + 原始货箱表）重算
+# 同一口径。那是刻意的第二份实现——复核的意义就在于不复用求解器的代码路径。
+# 两者若不一致，check_q3_metrics 会当场报出来。
+def box_index(d):
+    """{货箱编号: 货箱记录}。搜索里会被调很多次，故可建一次后传进来复用。"""
+    return {b['id']: b for bs in d.boxes_by_service.values() for b in bs}
+
+
+def weighted_tardiness(d, assignment, idx=None):
+    """加权迟到 = Σ_箱 优先系数 × max(0, 交付时刻 − 期望送达)。
+
+    返回 (加权迟到, 迟到箱数, 最长迟到s)。`expect` 为空的箱不计迟到——题面只对
+    给了期望送达时刻的箱计这个量，不要把「没给期望」当成「期望为 0」。
+    """
+    return _tard_scan(d, idx,
+                      ((t['deliver_abs'], t['boxes_at'], 0.0) for t in assignment))
+
+
+def shifted_tardiness(d, base_asg, deltas, idx=None):
+    """按 `deltas` 平移 `base_asg` 后各箱的加权迟到——搜索用的便宜路径。
+
+    候选动作（错峰、换站让位）都只是把若干架次整体后移，交付时刻随之整体平移，
+    故不必真造出 assignment 对象再评估：逐架次拿原交付时刻**加位移**即可。搜索里
+    每轮要试几十个动作，这条路径与 `weighted_tardiness` 同源（同一个 `_tard_scan`），
+    不会算出两套数。
+
+    位移必须真的加进去。曾有一版只把 `dl > 0` 当筛选条件、忘了把 `dl` 加到交付
+    时刻上，于是每个候选动作都在**平移前**的时刻上评估——基线本来就零迟到，算出来
+    全是 0，判据第三层永远判平、候选排序也成了空操作，换站修复照着列表顺序随便挑
+    一个。这种错不会报错、也不会让任何断言失败，只会让「已实现」的判据静默失效。
+    """
+    return _tard_scan(d, idx,
+                      ((base_asg[k]['deliver_abs'], base_asg[k]['boxes_at'], dl)
+                       for k, dl in enumerate(deltas) if dl > 1e-9))
+
+
+def _tard_scan(d, idx, triples):
+    """(交付时刻表, 该架次的 boxes_at, 整体位移s) → (加权迟到, 迟到箱数, 最长迟到s)。"""
+    idx = box_index(d) if idx is None else idx
+    w, n, mx = 0.0, 0, 0.0
+    for deliver, boxes_at, shift in triples:
+        for boxes in boxes_at.values():
+            for bx in boxes:
+                b = idx[bx['id']]
+                if b['expect'] is None:
+                    continue
+                late = deliver[bx['id']] + shift - b['expect']
+                if late <= 1e-6:
+                    continue
+                n += 1
+                mx = mx if mx > late else late
+                w += b['priority'] * late
+    return w, n, mx
+
+
+# ---------------------------------------------------------------------------
 # 4. 充电模型（两阶段等效充电）
 # ---------------------------------------------------------------------------
 def charge_time(soc_end, Tfull):

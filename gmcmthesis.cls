@@ -203,8 +203,27 @@ Just choose `xelatex', no `pdflatex' or `latex' and so on.}
   \newcommand\gmcm@pythonfont{\ttfamily}}
 
 % 中文正文、粗体与宋楷黑字体族由 ctex 按平台选择，勿覆盖为 macOS 专用字体。
-% 摘要页的固定标签使用隶书；模板随附字体，避免依赖系统安装。
-\setCJKfamilyfont{gmcm-cover-label}[Path=./]{LiSu.ttf}
+% 摘要页的固定标签使用隶书。原模板只按相对路径加载随附的 LiSu.ttf，于是
+% 「工程目录里没有这个文件就编不过」——而它是第三方商业字体（方正隶书），
+% 本工程既不随仓库转发、也不随提交包转发，换一台机器必然缺。
+% 这里改成三级回退，任何一台装了中文字体的机器都能编译：
+%   1) 工程目录内的 LiSu.ttf（版式与模板原始效果完全一致）；
+%   2) 系统安装的隶书（Windows 自带 simli.ttf，字体名 LiSu；macOS 为 STLiti）；
+%   3) 楷体。三级皆无才会失败，且失败原因是「机器没有任何中文字体」，
+%      那已经与本文无关。
+\IfFileExists{LiSu.ttf}{%
+  \setCJKfamilyfont{gmcm-cover-label}[Path=./]{LiSu.ttf}%
+}{%
+  \IfFontExistsTF{LiSu}{%
+    \setCJKfamilyfont{gmcm-cover-label}{LiSu}%
+  }{%
+    \IfFontExistsTF{STLiti}{%
+      \setCJKfamilyfont{gmcm-cover-label}{STLiti}%
+    }{%
+      \setCJKfamilyfont{gmcm-cover-label}{KaiTi}%
+    }%
+  }%
+}
 \newcommand\gmcm@coverfont{\CJKfamily{gmcm-cover-label}}
 
 

@@ -12,6 +12,13 @@
 #   2) 先用 q2 自己落盘的 CSV 复核 JSON 内容（架次数、逐箱交付、能耗）自洽；
 #   3) 把旧/新哈希与旧/新 solution_id 写进 results/_q2_hash_refresh.txt 备查。
 # 这一步是记账修补，不是重新求解——论文与最终汇报均须如实说明。
+#
+# ⚠️ 本脚本已被收紧，**当前状态下跑不动 2026-09-24 那一次刷新**：新增的证据
+# 要求是「文本规范化哈希也不变」（见下方 real 判定），而那次改的是
+# solution_io.build_q3_solution 里的类型转换，是真实代码改动，不是换行差异。
+# 也就是说，那一次刷新的依据始终只是「人工判断该函数不在 q2 的路径上」——
+# 记录文件里也是这么写的。阶段 11 的整链重跑会重新生成全部方案记录，使这次
+# 刷新及其记录一并作废；重跑之后，本脚本只对「纯换行差异」生效，其余重跑。
 import io
 import json
 import os
@@ -43,6 +50,23 @@ def main():
     if diff != ['code/solution_io.py']:
         raise SystemExit('预期只有 code/solution_io.py 一项哈希变化，实为 %s；'
                          '请重新运行 q2.py，不要刷新记录' % diff)
+
+    # 上面那条只是**白名单**（「改的必须是这个文件」），它挡不住「改的就是这个
+    # 文件的算法」——真正要证的是「代码一个字没动」。文本规范化哈希能直接给出
+    # 这个证明：把换行归一后再算，两版逐字一致 ⇔ 这次改动只动了换行符。
+    # 于是规则收紧为：**只有文本哈希也不变才允许刷新**，其余一律重跑。
+    old_t = sol.get('solver_text_hashes', {})
+    new_t = sio.solver_hashes_text(sio.Q2_SOLVER_FILES)
+    real = [k for k in diff if old_t.get(k) != new_t.get(k)]
+    if real:
+        raise SystemExit(
+            '以下源码的**文本内容**也已改变，不是换行差异：%s\n'
+            '说明这次改动真的动了代码，刷新哈希会把它掩盖掉——必须重跑 q2.py。'
+            % '、'.join(real))
+    if not old_t:
+        raise SystemExit(
+            '该方案记录里没有 solver_text_hashes，无法判定改动是否只涉及换行。\n'
+            '缺少这个证据时不能刷新哈希——请重跑 q2.py。')
 
     # ---- 1) 用 q2 自己落盘的 CSV 复核 JSON 内容自洽 ----
     tt = pd.read_csv(os.path.join(RES, 'q2_transport_trips.csv'), encoding='utf-8-sig')

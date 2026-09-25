@@ -26,7 +26,8 @@ from scipy.optimize import milp, LinearConstraint, Bounds
 from scipy import sparse
 from core import T_DEC, E_DEC, load_data, charge_time
 from q2 import precompute_geometry
-from solution_io import (load_solution, input_hashes, solver_hashes, Q3_SOLVER_FILES)
+from solution_io import (load_solution, input_hashes, solver_hashes,
+                         solver_hashes_text, Q3_SOLVER_FILES)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, '..', 'results')
@@ -289,7 +290,8 @@ def main():
     # 全都在算另一个方案。这里改为读问题三的方案，并先验 solution_id 与来源哈希。
     q3_sol = load_solution(Q3_SOL, stage='q3',
                            input_hashes_expect=input_hashes(),
-                           solver_hashes_expect=solver_hashes(Q3_SOLVER_FILES))
+                           solver_hashes_expect=solver_hashes(Q3_SOLVER_FILES),
+                           solver_text_hashes_expect=solver_hashes_text(Q3_SOLVER_FILES))
     print(f'读取问题三方案 {q3_sol["solution_id"]}（来源 {q3_sol["source_solution_id"]}，'
           f'{len(q3_sol["transport_trips"])} 运输架次 / {len(q3_sol["relay_trips"])} 中继架次）')
 
@@ -351,6 +353,18 @@ def main():
         best = None
         n_part = 0
         relay_tot, n_feas = [], 0
+        # 逐类资源在**全部**分区上的最小需求。论文要说「某一类缺 K 架」时，必须先
+        # 分清这是「推荐分区的性质」还是「任何分区都躲不掉」——只有后者才谈得上
+        # 结构性缺口。别把推荐分区那一侧的数字写成定律，也别把推荐分区的需求当成
+        # 结构性需求。本算例实测（见 _run_logs/q4_final.log 的「全部分区中的最小需求」
+        # 一行）：
+        #   K=2：八类的 min_tot 全部 <= 库存（中继 2/2、B 型 2/2），没有任何一类
+        #        是结构性缺口；库存可行分区数为 0 纯粹是「各类的最小值落在**不同**
+        #        分区上」的联合约束结果。
+        #   K=3：中继无人机 min_tot=3 > 库存 2 —— 3 个非空组各至少要 1 架，库里只有
+        #        2 架，这是**结构性**的，与怎么分组无关；其余七类仍非结构性。
+        # 两个 K 都不可行，但不可行的成因不同，论文必须分开说。
+        min_tot = {k: 10 ** 9 for k in RES_KEYS}
         for groups in partition_sets(units, K):
             n_part += 1
             res_g, w_g = [], []
@@ -368,6 +382,9 @@ def main():
                     gap[k] += max(0, res[k] - stock[k])
                     red[k] += max(0, stock[k] - res[k])
             R = sum(tot.values())
+            for k in RES_KEYS:
+                if tot[k] < min_tot[k]:
+                    min_tot[k] = tot[k]
             W = np.array(w_g, dtype=float)
             cvw = float(W.std(ddof=0) / W.mean()) if W.mean() > 0 else 0.0
             # 总量口径：全队共用同一批库存时，总需求有没有超出库存。这才是"这套
@@ -385,17 +402,17 @@ def main():
                         gap=gap, red=red, short=short, R=R, cvw=cvw, W=W)
             if best is None or (cand['R'], cand['cvw']) < (best['R'], best['cvw']):
                 best = cand
-        summary.append((K, n_part, best, min(relay_tot), n_feas))
+        summary.append((K, n_part, best, min(relay_tot), n_feas, min_tot))
 
     # 独立复核：组列集合划分 ILP
     check = {}
-    for K, n_part, best, _rm, _nf in summary:
+    for K, n_part, best, _rm, _nf, _mt in summary:
         cost_of = lambda members: sum(eval_group(members)[0].values())   # noqa: E731
         ilp = solve_group_column_ilp(n, K, cost_of)
         check[K] = ilp
 
     alloc_rows = []
-    for K, n_part, best, relay_min, n_feas in summary:
+    for K, n_part, best, relay_min, n_feas, min_tot in summary:
         print('=' * 74)
         print(f'K={K}：枚举 {n_part} 个分区（理论 {_stirling(n, K)} 个），'
               f'最优资源规模 R={best["R"]}，工作量均衡 CV_W={best["cvw"]:.4f}')
@@ -461,6 +478,11 @@ def main():
         print(f'     全 {n_part} 个分区中，总量口径不缺任何资源的仅 {n_feas} 个'
               f'（占 {100.0*n_feas/n_part:.0f}%）；各分区中继无人机总需求最小 {relay_min}'
               f'，库存仅 {stock["relay"]}')
+        print('     ---- 全部分区中的最小需求（判「结构性缺口」用这一行，'
+              '不是推荐分区的需求）----')
+        for k in RES_KEYS:
+            print(f'       {RES_LABEL[k]}: 最小需求 {min_tot[k]:2d}  库存 {stock[k]:2d}  '
+                  f'最小缺口 {max(0, min_tot[k] - stock[k]):2d}')
         if any(best['short'].values()):
             lack = '、'.join(f'{RES_LABEL[k]}缺 {best["short"][k]}'
                             for k in RES_KEYS if best['short'][k] > 0)
@@ -474,7 +496,7 @@ def main():
 
     # 比较指标表
     cmp_rows = []
-    for K, n_part, best, relay_min, n_feas in summary:
+    for K, n_part, best, relay_min, n_feas, min_tot in summary:
         row = dict(K=K, 分区数=n_part, 资源规模R=best['R'],
                    工作量均衡CV_W=round(best['cvw'], 6),
                    总量缺口=sum(best['short'].values()),
@@ -487,6 +509,9 @@ def main():
             row['库存_' + RES_LABEL[k]] = stock[k]
             row['总量缺口_' + RES_LABEL[k]] = best['short'][k]
             row['分组缺口_' + RES_LABEL[k]] = best['gap'][k]
+            # 全部分区中的最小需求：区分「推荐分区的缺口」与「躲不掉的结构性缺口」
+            row['最小需求_' + RES_LABEL[k]] = min_tot[k]
+            row['最小缺口_' + RES_LABEL[k]] = max(0, min_tot[k] - stock[k])
         cmp_rows.append(row)
     pd.DataFrame(cmp_rows).to_csv(os.path.join(OUT, 'q4_comparison.csv'), index=False)
 

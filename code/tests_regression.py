@@ -944,6 +944,152 @@ def t_backhaul_required():
                   tolerance='覆盖判定必须随回传翻转')
 
 
+# --- T15b ------------------------------------------------------------------
+@case
+def t_verifier_checks_backhaul():
+    """
+    T15b：**验证程序**本身必须查回传，而不只是求解器里的 station_covers 查。
+
+    T15 只证明 q3.station_covers 会因回传不可用而翻转；`verify.check_relay_final`
+    是另一条代码路径，它从前只调 link_ok(..., Lmax_a) 判接入，回传那一半从不
+    参与，于是把 Lmax_r_gw 改成 -999 dB（回传物理上不可能）重跑，它照样
+    报 passed=True。反向测试：真实参数下必须通过，把回传余量打到负值后必须失败。
+    """
+    v = _mod('verify')
+    if _need('q3_transport_trips.csv', 'q3_relay_trips.csv', 'q3_stations.csv',
+             'q3_intervals.csv', 'q3_comm_phases.csv', 'q3_coverage.csv'):
+        return result('T15b 验证程序必须查回传', True, skipped=True,
+                      errors=['缺问题三结果表，请先运行 python code/q3.py'])
+    d, _q1 = _data()
+    errs = []
+    ok0 = v.check_relay_final(d)
+    if not ok0['passed']:
+        errs.append('真实参数下复核本应通过，却报失败：%s' % ok0['errors'][:2])
+    # 浅拷贝 d 后再拷贝 comm，避免把缓存的 d 改坏、污染后续用例
+    d_bad = copy.copy(d)
+    d_bad.comm = copy.copy(d.comm)
+    real = d_bad.comm.Lmax_r_gw
+    d_bad.comm.Lmax_r_gw = -999.0
+    bad = v.check_relay_final(d_bad)
+    if bad['passed']:
+        errs.append('把 Lmax_r_gw 改成 -999 dB（回传不可用）后复核仍报通过——'
+                    '验证程序漏掉了回传链路')
+    elif not any('回传' in e for e in bad['errors']):
+        errs.append('失败原因里没有一条提到回传，可能不是回传判据触发：%s' % bad['errors'][:2])
+    return result('T15b 验证程序必须查回传', not errs, errs,
+                  metrics={'Lmax_r_gw dB': '%.2f（改为 -999 后复核失败 %d 条）'
+                           % (real, len(bad['errors']))},
+                  tolerance='回传不可用必须使复核失败')
+
+
+# --- T-Q4m -----------------------------------------------------------------
+@case
+def t_q4_min_demand_enumerated():
+    """
+    T-Q4m：q4_comparison.csv 的「最小需求_*」两列必须真的是**全部分区上的下确界**。
+
+    这两列是论文「某类资源在任一方案下都缺 N 架」这类全称断言的唯一数据依据，
+    而 verify.py 只做表内自洽核对、不重跑枚举（重跑要用 q4 的分组层）。本用例
+    对每个 K 重跑全部 S(n_units, K) 个分区，逐个算八类需求再取逐类最小值，与
+    表内列对照（分区数随原子单元数变化，故只打印实测值，不写死）。
+
+    **独立性边界**：本用例调用 q4.group_resources 与 q4.partition_sets，与
+    q4.py 共享同一套分组资源核算，故它证明的是「枚举与计数一致」，**不是**
+    「分组成本输入已由第二套独立实现验证」。后者由 T-R3 一类的资源区间重算
+    用例负责，两者不可互相替代。
+    """
+    need = ['q4_partition.csv', 'q4_units.csv', 'q4_comparison.csv']
+    miss = _need(*need)
+    if miss:
+        return result('T-Q4m 全部分区最小需求', True, skipped=True,
+                      errors=['缺 %s，请先运行 python code/q4.py' % '、'.join(miss)])
+    q4 = _mod('q4')
+    import q2
+    d, _q1 = _data()
+    if not hasattr(d, 'geo'):
+        d.geo_nodes, d.geo = q2.precompute_geometry(d)
+    sol = S.load_solution(q4.Q3_SOL, stage='q3',
+                          input_hashes_expect=q4.input_hashes(),
+                          solver_hashes_expect=q4.solver_hashes(q4.Q3_SOLVER_FILES))
+    asg = q4.build_assignment(sol, d)
+    rr = q4.build_relays(sol, d)
+    relay_of_trip = q4.join_relays(sol, rr)
+    units = q4.atomic_units(d, asg)
+
+    unit_trips, unit_relays = [], []
+    for u in units:
+        us = set(u)
+        tids = [a['idx'] for a in asg if set(a['route']) <= us]
+        unit_trips.append(tids)
+        seen, rl = set(), []
+        for k in tids:
+            for x in relay_of_trip[asg[k]['trip_id']]:
+                if x['id'] not in seen:
+                    seen.add(x['id'])
+                    rl.append(x)
+        unit_relays.append(rl)
+
+    cache = {}
+
+    def demand(members):
+        key = frozenset(members)
+        if key not in cache:
+            tids = [k for m in members for k in unit_trips[m]]
+            seen, rl = set(), []
+            for m in members:
+                for x in unit_relays[m]:
+                    if x['id'] not in seen:
+                        seen.add(x['id'])
+                        rl.append(x)
+            cache[key] = q4.group_resources(tids, asg, rl)
+        return cache[key]
+
+    cmp_ = pd.read_csv(os.path.join(OUT, 'q4_comparison.csv'), encoding='utf-8-sig')
+    part = pd.read_csv(os.path.join(OUT, 'q4_partition.csv'), encoding='utf-8-sig')
+    labels = [c for c in part.columns
+              if c not in ('K', '任务组编号', '服务区列表', '工作量h')]
+    lab2key = {v: k for k, v in q4.RES_LABEL.items()}          # 中文列名 -> 内部键
+    errs, n_part = [], 0
+    n_by_k = {}
+    min_all = {}
+    for K in (2, 3):
+        mn = {lab: 10 ** 9 for lab in labels}
+        n_k = 0
+        for groups in q4.partition_sets(units, K):
+            n_part += 1
+            n_k += 1
+            tot = {lab: 0 for lab in labels}
+            for members in groups:
+                r = demand(members)
+                for lab in labels:
+                    tot[lab] += r[lab2key[lab]]
+            for lab in labels:
+                mn[lab] = min(mn[lab], tot[lab])
+        min_all[K] = mn
+        n_by_k[K] = n_k
+        row = cmp_[cmp_['K'] == K]
+        if not len(row):
+            errs.append('q4_comparison.csv 缺 K=%d 行' % K)
+            continue
+        row = row.iloc[0]
+        for lab in labels:
+            col = '最小需求_' + lab
+            if col not in cmp_.columns:
+                errs.append('q4_comparison.csv 缺列 %s' % col)
+            elif int(row[col]) != mn[lab]:
+                errs.append('K=%d %s 的最小需求：独立枚举 %d vs 表内 %s'
+                            % (K, lab, mn[lab], row[col]))
+    return result('T-Q4m 全部分区最小需求', not errs, errs,
+                  metrics={'枚举分区数': '%d（%s）' % (
+                               n_part, ' + '.join('K=%d %d' % (K, n_by_k[K])
+                                                  for K in sorted(n_by_k))),
+                           'B 型机最小需求': 'K=2 %d | K=3 %d'
+                           % (min_all[2]['B型运输无人机'], min_all[3]['B型运输无人机']),
+                           '中继机最小需求': 'K=2 %d | K=3 %d'
+                           % (min_all[2]['中继无人机'], min_all[3]['中继无人机'])},
+                  tolerance='逐类逐 K 与表内列逐位相等')
+
+
 # --- T16 -------------------------------------------------------------------
 @case
 def t_archive_k_cap():
@@ -1114,7 +1260,19 @@ def t_exit_code_nonzero():
 # --- T21 -------------------------------------------------------------------
 @case
 def t_packaging_preflight():
-    """T21：打包清单缺项（结果表/图/字体/模板）时必须预检失败，不产出提交包。"""
+    """T21：打包清单缺项时必须预检失败、不产出提交包；且清单不得与哈希口径脱节。
+
+    交付一致性（审阅报告 P0-4）三件事在这里立成回归：①数据清单必须**等于**
+    solution_io.input_hashes() 的键集——上一版手写 6 项、哈希 17 项，评委解压后
+    每条方案都被判"输入数据不一致"；②第三方商业字体 LiSu.ttf 不得随包转发，
+    同时又不能成为编译必需（gmcmthesis.cls 必须有字体回退）；③纯仓库检出
+    （无赛题数据）时，预检要明确报"数据一个都没有"，而不是当作"没有数据要打"。
+
+    预检里允许出现的缺失只有两类**环境性前提**：赛题数据（纯仓库检出时本来就没有）
+    与论文 PDF main.pdf（由 latexmk 编出来；交付包只带编好的成品 论文/论文-队号.pdf，
+    不在包根放 main.pdf）。这两项之外任何一项缺失都是真缺项，必须报错——本用例
+    在工程目录与在解压后的交付包里都要能跑过，故按实际在位情况分别断言。
+    """
     root = os.path.dirname(HERE)
     errs = []
     if root not in sys.path:
@@ -1123,24 +1281,47 @@ def t_packaging_preflight():
         bs = _mod('build_submission')
     except Exception as e:                                        # noqa: BLE001
         return result('T21 打包预检', False, ['无法导入 build_submission：%r' % (e,)])
-    if bs.preflight():
-        errs.append('当前工程预检就不通过：%s' % '；'.join(bs.preflight()))
+    has_data = bool(bs.sio.input_hashes())
+    has_pdf = all(os.path.exists(os.path.join(root, p)) for p in bs.PAPER_PDF)
+    got0 = bs.preflight()
+    if has_data and has_pdf:
+        if got0:
+            errs.append('当前工程预检就不通过：%s' % '；'.join(got0))
+    else:
+        allowed = ([] if has_data else ['原始数据']) + ([] if has_pdf else ['论文正文'])
+        if len(got0) != len(allowed) or \
+                not all(any(a in b for a in allowed) for b in got0):
+            errs.append('缺数据/缺论文 PDF 时预检未按环境性缺失报出：%s（应为 %s）'
+                        % (got0, allowed))
+    if sorted(bs.DATA) != sorted(bs.sio.input_hashes()):
+        errs.append('打包数据清单与 input_hashes() 不一致：清单 %d 项、哈希 %d 项'
+                    % (len(bs.DATA), len(bs.sio.input_hashes())))
+    for f in bs.LOCAL_ONLY:
+        if f in bs.SUPPORT:
+            errs.append('%s 是本地资源（授权不许再分发），不得列入 SUPPORT' % f)
+    cls = open(os.path.join(root, 'gmcmthesis.cls'), encoding='utf-8').read()
+    if 'IfFileExists{LiSu.ttf}' not in cls:
+        errs.append('gmcmthesis.cls 缺字体回退：没有 LiSu.ttf 的机器编不过论文，'
+                    '而该字体又不随包分发')
     keep_sup, keep_data = list(bs.SUPPORT), list(bs.DATA)
     try:
         bs.SUPPORT = keep_sup + ['code/__不存在的文件__.csv']
         bs.DATA = keep_data + ['数据/__不存在的数据__']
+        # 环境性缺失（无数据 / 无论文 PDF）本来就在 got0 里，故期望值随之抬高
+        want = 2 + len(got0)
         bad = bs.preflight()
-        if len(bad) != 2:
-            errs.append('注入 2 项缺失却报出 %d 项：%s' % (len(bad), bad))
+        if len(bad) != want:
+            errs.append('注入 2 项缺失却报出 %d 项（期望 %d）：%s' % (len(bad), want, bad))
         if not any('__不存在的文件__' in b for b in bad) or \
                 not any('__不存在的数据__' in b for b in bad):
             errs.append('缺失项未被逐条列出：%s' % bad)
     finally:
         bs.SUPPORT, bs.DATA = keep_sup, keep_data
-    if bs.preflight():
-        errs.append('恢复清单后预检仍不通过')
+    if bs.preflight() != got0:
+        errs.append('恢复清单后预检结果与注入前不一致')
     return result('T21 打包预检', not errs, errs,
-                  metrics={'清单项': len(bs.PAPER_PDF) + len(keep_sup) + len(keep_data)},
+                  metrics={'清单项': len(bs.PAPER_PDF) + len(keep_sup) + len(keep_data),
+                           '数据清单': '%d 项（与 input_hashes() 同源）' % len(keep_data)},
                   tolerance='缺项必须逐条列出并使预检失败')
 
 

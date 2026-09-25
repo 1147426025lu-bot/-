@@ -157,7 +157,7 @@
         <mxCell id="box_1_2_0" value="大区用 C&lt;br&gt;小区用 B" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="468.0" y="246.0" width="127.0" height="50.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_1_2_1" value="18 架次&lt;br&gt;63.18 kWh" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_1_2_1" value="18 架次&lt;br&gt;59.24 kWh" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="468.0" y="304.0" width="127.0" height="50.0" as="geometry" />
 </mxCell>
         <mxCell id="vlab_1_3" value="灵&lt;br&gt;敏&lt;br&gt;度" style="text;html=1;strokeColor=none;fillColor=none;whiteSpace=wrap;fontSize=17;fontColor=#000000;align=center;verticalAlign=top;" vertex="1" parent="1">
@@ -202,10 +202,10 @@
         <mxCell id="vlab_2_2" value="求&lt;br&gt;解&lt;br&gt;结&lt;br&gt;果" style="text;html=1;strokeColor=none;fillColor=none;whiteSpace=wrap;fontSize=17;fontColor=#000000;align=center;verticalAlign=top;" vertex="1" parent="1">
   <mxGeometry x="444.0" y="472.0" width="20.0" height="166.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_2_2_0" value="20 架次&lt;br&gt;零违约" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_2_2_0" value="24 架次&lt;br&gt;零违约" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="468.0" y="468.0" width="127.0" height="50.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_2_2_1" value="68.71 kWh&lt;br&gt;8733 s" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_2_2_1" value="69.32 kWh&lt;br&gt;6506 s" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="468.0" y="526.0" width="127.0" height="50.0" as="geometry" />
 </mxCell>
         <mxCell id="vlab_2_3" value="方&lt;br&gt;案&lt;br&gt;对&lt;br&gt;比" style="text;html=1;strokeColor=none;fillColor=none;whiteSpace=wrap;fontSize=17;fontColor=#000000;align=center;verticalAlign=top;" vertex="1" parent="1">
@@ -229,7 +229,7 @@
         <mxCell id="box_3_0_1" value="视线遮挡&lt;br&gt;与链路预算" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="86.0" y="732.0" width="127.0" height="50.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_3_0_2" value="66.18% 直连&lt;br&gt;33.82% 盲区" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_3_0_2" value="71.67% 直连&lt;br&gt;28.33% 中继" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="86.0" y="790.0" width="127.0" height="50.0" as="geometry" />
 </mxCell>
         <mxCell id="vlab_3_1" value="中&lt;br&gt;继&lt;br&gt;选&lt;br&gt;址" style="text;html=1;strokeColor=none;fillColor=none;whiteSpace=wrap;fontSize=17;fontColor=#000000;align=center;verticalAlign=top;" vertex="1" parent="1">
@@ -247,10 +247,10 @@
         <mxCell id="vlab_3_2" value="中&lt;br&gt;继&lt;br&gt;调&lt;br&gt;度" style="text;html=1;strokeColor=none;fillColor=none;whiteSpace=wrap;fontSize=17;fontColor=#000000;align=center;verticalAlign=top;" vertex="1" parent="1">
   <mxGeometry x="444.0" y="694.0" width="20.0" height="166.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_3_2_0" value="中继 6 架次" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_3_2_0" value="中继 7 架次" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="468.0" y="690.0" width="127.0" height="34.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_3_2_1" value="4.96 kWh" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_3_2_1" value="4.49 kWh" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="468.0" y="732.0" width="127.0" height="34.0" as="geometry" />
 </mxCell>
         <mxCell id="vlab_3_3" value="零&lt;br&gt;中&lt;br&gt;断" style="text;html=1;strokeColor=none;fillColor=none;whiteSpace=wrap;fontSize=17;fontColor=#000000;align=center;verticalAlign=top;" vertex="1" parent="1">
@@ -286,7 +286,7 @@
         <mxCell id="box_4_1_0" value="受限增长串&lt;br&gt;完全枚举" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="277.0" y="912.0" width="127.0" height="50.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_4_1_1" value="分区数&lt;br&gt;63 / 301" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_4_1_1" value="分区数&lt;br&gt;2047 / 86526" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="277.0" y="970.0" width="127.0" height="50.0" as="geometry" />
 </mxCell>
         <mxCell id="vlab_4_2" value="峰&lt;br&gt;值&lt;br&gt;并&lt;br&gt;发" style="text;html=1;strokeColor=none;fillColor=none;whiteSpace=wrap;fontSize=17;fontColor=#000000;align=center;verticalAlign=top;" vertex="1" parent="1">
@@ -301,13 +301,13 @@
         <mxCell id="vlab_4_3" value="资&lt;br&gt;源&lt;br&gt;缺&lt;br&gt;口" style="text;html=1;strokeColor=none;fillColor=none;whiteSpace=wrap;fontSize=17;fontColor=#000000;align=center;verticalAlign=top;" vertex="1" parent="1">
   <mxGeometry x="635.0" y="916.0" width="20.0" height="166.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_4_3_0" value="库存可行&lt;br&gt;分区数为 0" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_4_3_0" value="K=3 中继&lt;br&gt;结构性缺1架" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="659.0" y="912.0" width="127.0" height="50.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_4_3_1" value="中继机需求&lt;br&gt;不少于组数 K" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_4_3_1" value="其余各类&lt;br&gt;非结构性缺" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="659.0" y="970.0" width="127.0" height="50.0" as="geometry" />
 </mxCell>
-        <mxCell id="box_4_3_2" value="K=2 即缺&lt;br&gt;B 机与中继机" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="box_4_3_2" value="库存可行&lt;br&gt;分区数为 0" style="rounded=0;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;fontSize=17;fontColor=#000000;align=center;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="659.0" y="1028.0" width="127.0" height="50.0" as="geometry" />
 </mxCell>
         <mxCell id="arr_0_0" value="" style="shape=singleArrow;direction=east;html=1;fillColor=#ffffff;strokeColor=#000000;strokeWidth=1;arrowWidth=0.42;arrowSize=0.30;" vertex="1" parent="1">

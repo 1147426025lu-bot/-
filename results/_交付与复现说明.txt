@@ -1,0 +1,75 @@
+交付与复现说明（随支撑材料分发，非论文内容）
+=============================================
+
+一、包内构成
+  论文/论文-<队号>.pdf   论文正文
+  支撑材料.zip           源码、图表、结果表、原始数据、AI 工具使用详情
+
+二、复现步骤（在支撑材料解压后的根目录按序执行）
+  1) 环境：Python 3.14.0；numpy 2.3.5、scipy 1.18.1、pandas 2.3.3、
+     matplotlib 3.10.8、seaborn 0.13.2、networkx 3.7、openpyxl 3.1.5。
+     中文 Windows 的控制台默认 GBK，需设 PYTHONIOENCODING=utf-8 再运行，
+     否则脚本的中文输出与文件名会报编码错。随机种子只走 PYTHONHASHSEED。
+  2) 求解（按序执行，后一步读前一步落盘的方案记录）：
+       python code/q1.py
+       python code/q2.py --engine v2 --seeds 5 --iters 3500 --k-targets 20,22,25,30
+       python code/q2_exact.py
+       python code/q3.py
+       python code/q4.py
+     实测单次耗时：q2 约 1487.8 s、q3 约 97.2 s（其余在分钟级）。
+     问题二的种子 20260923、K 档位 20/22/25/30（由 --k-targets 给出）；落盘方案
+     要过"问题二等价最优类内的中继门禁"才交给第三问，见第三节第 4 条。
+     问题三的逐时刻审计步长 1.0 s、搜索步长 2.0 s。
+     任一落盘记录被改动、或其源码哈希失效时，加载器会拒绝读入并报错，
+     不会静默使用过期方案——遇到报错请从 q1 起重跑整链。
+  3) 复核：code/verify.py（应退出码 0，11 项全过）；
+          code/tests_regression.py（应 31 项全过、0 跳过）。
+  4) 数字与图表：code/paper_metrics.py → code/fill_results.py → code/figures.py →
+     code/figures_adv.py → code/make_roadmap.py、code/make_q2_algorithm.py →
+     code/render_drawio.py（每个 .drawio 各传一次路径）→
+     latexmk -g -xelatex -interaction=nonstopmode main.tex。
+     论文正文的数字不由人工誊写：全部 \mtXXX 宏来自 results/paper_metrics.json。
+     排版门禁四条（在 main.log 上数）：Overfull \hbox、Overfull \vbox、
+     Reference .* undefined、Citation .* undefined 各为 0，且摘要恰一页。
+     Underfull 不计入门禁（干净基线本就有数十条）。
+  5) 打包：python build_submission.py --check 先预检，再不带参数执行。包内不放
+     main.pdf（论文成品单列在 论文/ 下），故预检要求先由第 4 步编出 main.pdf；
+     清单缺项时预检会逐条列出并中止，不会产出一个"看起来完整"的包。
+
+三、交付一致性的四条硬规矩（改动前先读）
+  1) 数据清单只有一个来源：code/solution_io.py 的 input_hashes()。方案记录里的
+     输入身份覆盖 数据/ 下全部 17 个文件，打包器也打这 17 个。只打其中"代码
+     真正读得到"的 6 个，评委解压后每条方案都会被判"输入数据不一致"而被加载器
+     拒绝——包看着完整，却一条都跑不通。
+  2) 源码哈希按**字节**计算，于是换行符也算差异。本工程源码的换行并不统一
+     （脚本以文本模式写出的文件是 CRLF，编辑器写出的文件是 LF），.gitattributes
+     已逐个锁定：code/core.py、code/q2.py 为 CRLF；code/q3.py、
+     code/solution_io.py、code/q2_v2.py、code/q3_v2.py 为 LF。改动这六个文件
+     会让 results/q2_solution.json、results/q3_solution.json 当场失效——那不是
+     "代码算错了"，而是记录需要重出，唯一正路是按第二节第 2 步重跑整链。
+     results/_q2_hash_refresh.txt 是 2026-09-24 的一次**历史**记账修补留痕，
+     已由 2026-09-25 的整链重解取代，不再描述当前状态；保留它只为留下改过什么。
+  3) LiSu.ttf 是第三方商业字体，授权不允许再分发：本包不含它。gmcmthesis.cls
+     已改为三级回退（工程内 LiSu.ttf → 系统隶书 LiSu/STLiti → 楷体），实测在
+     没有该文件的目录下 xelatex 仍以退出码 0 编出全文。
+  4) 问题二 → 问题三之间有一道**中继门禁**（code/q2_v2.py 的 relay_feasible_order）。
+     问题二的目标函数对"同一架次内服务区的先后次序"不敏感，因此其最优解是一个
+     **等价类**：把同一架次内的两个服务区互换，五项报告指标可以逐位不变。门禁在
+     保持这五项指标逐位不变的前提下，按第三问的字典序键（无绑定区间数、缺口秒数、
+     累计推迟、联合完工、中继能耗）在该等价类内择序。本算例 25 个候选中有 3 个
+     指标逐位不变，选中「U06 第 6 位与第 8 位互换」，第三问中断由 0.6688% 降为 0。
+
+四、未做的复核（如实列出，不得当作已做）
+  · 未做多种子对照实验：问题二的解依赖固定种子，不声称全局最优，其质量由两层
+    小规模精确解（code/q2_exact.py）标定；
+  · code/verify.py 与求解器共享公共物理模块 code/core.py，它排除的是"求解程序
+    内部状态与结果表之间的串号、漏检与自我印证"，不能排除公共物理口径本身出错；
+  · 问题四"全部分区中的最小需求"由 code/q4.py 枚举得出，verify.py 只核对它与
+    推荐需求、库存三者自洽、不重跑枚举；该列的真值由 tests_regression.py 的
+    T-Q4m 以一次独立枚举逐类核对；
+  · 问题三的中继方案由**联合调度**路径给出。另一条"运输重排 ↔ 中继归属"固定点
+    迭代路径（code/q3_v2.py）在本算例**未被采用**：12 轮内 release 仍在增长而未
+    收敛（由 0 单调增至 33388 s，末轮缺口 1694 s），故按字典序退回联合路径。
+    论文 7.5 节已如实记录该结果与弃用原因，不称其"有效"；
+  · 问题四的两类分区在给定库存下均不可行，本文只给出补配清单，**未给出**任何
+    可行分区方案；其中 K=3 的中继无人机缺 1 架是结构性短缺（换任何分区消不掉）。
