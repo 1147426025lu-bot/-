@@ -5,9 +5,14 @@
 # 版本发布日期：2026 年 9 月 10 日。
 r"""打包提交材料。
 
-分两个包：
-  提交包/论文-<队号>.pdf        论文正文，单独一个文件
-  提交包/支撑材料.zip           源码、图表、程序、结果、AI 使用详情
+分两个包，文件名均按官方《下载试题及上传论文操作手册》"参赛试题编号+队伍编号"
+命名（手册原文："将最终参赛论文转为 PDF 格式并以参赛试题编号+队伍编号命名，如
+A18100010001.pdf"；附件亦同，"题号+队号"）：
+  提交包/论文/D<队号>.pdf       论文正文，单独一个文件
+  提交包/D<队号>.zip            源码、图表、程序、结果、AI 使用详情
+
+队号只出现在这两个提交文件名里——它是竞赛规定的提交接口，不是论文内容；
+论文正文（含附录）一律不得出现队号，故附录里的包名只叙述命名规则、不落队号。
 
 刻意排除三类东西：
   1) 智能体与编辑器的工作文件（CLAUDE.md / AGENTS.md / .mathmodel/）——
@@ -52,6 +57,10 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 ROOT = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(ROOT, '提交包')
 TEAM = '20260095597'
+# 试题编号。两个提交产物都叫 PROBLEM+TEAM（手册要求的"参赛试题编号+队伍编号"），
+# 例如 D20260095597.pdf 与 D20260095597.zip。
+PROBLEM = 'D'
+STEM = PROBLEM + TEAM
 
 # 数据清单的唯一真相源在 code/solution_io.py（方案记录里的 input_hashes 也由它
 # 生成）。打包器不另写一份，否则两份清单迟早走味。
@@ -216,8 +225,8 @@ def main():
 
     # 1) 论文正文
     for f in PAPER_PDF:
-        shutil.copy2(os.path.join(ROOT, f), os.path.join(paper_dir, '论文-%s.pdf' % TEAM))
-        print('论文  %s' % os.path.join('论文', '论文-%s.pdf' % TEAM))
+        shutil.copy2(os.path.join(ROOT, f), os.path.join(paper_dir, '%s.pdf' % STEM))
+        print('论文  %s' % os.path.join('论文', '%s.pdf' % STEM))
 
     # 2) 支撑材料
     total = 0
@@ -246,8 +255,10 @@ def main():
           % (total, len(DATA)))
     print('本地资源（不入包）：%s' % _local_note())
 
-    # 3) 支撑材料打成 zip——多数提交系统只收单个压缩包
-    zpath = os.path.join(OUT, '支撑材料.zip')
+    # 3) 附件打成 zip——多数提交系统只收单个压缩包。手册写的是"题号+队号.rar"，
+    # 扩展名按 .rar 举例；本机无 rar 压缩工具（7-Zip 只能解不能压），且手册未载
+    # 系统只收 .rar，故用通用性更强的 .zip，名称部分严格照手册。
+    zpath = os.path.join(OUT, '%s.zip' % STEM)
     with zipfile.ZipFile(zpath, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         for dirpath, dirnames, filenames in os.walk(sup_dir):
             dirnames[:] = [d for d in dirnames if d not in SKIP_DIR]
@@ -271,7 +282,7 @@ def main():
         bad.append('.mathmodel/')
     print('  未发现智能体工作文件或编译中间产物' if not bad else '  !! 残留：%s' % bad)
 
-    # 4.5) 收掉暂存目录。支撑材料.zip 已经独立完整，暂存的 提交包/支撑材料/
+    # 4.5) 收掉暂存目录。附件压缩包已经独立完整，暂存的 提交包/支撑材料/
     # 只是打包过程中的中间态，留着会让 提交包/ 的体积凭空翻倍、也让"包里到底
     # 有什么"出现两个互相矛盾的事实来源（目录 vs 压缩包）。想看内容直接开 zip。
     shutil.rmtree(sup_dir)

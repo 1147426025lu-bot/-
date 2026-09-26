@@ -203,10 +203,13 @@ Just choose `xelatex', no `pdflatex' or `latex' and so on.}
   \newcommand\gmcm@pythonfont{\ttfamily}}
 
 % \texttt{} 里的汉字默认走 ctex 的 CJK 等宽映射，Windows 字体集下映射到**仿宋**。
-% 于是「\texttt{支撑材料.zip}」这类文件名会一半仿宋、一半 Courier：汉字笔画比
-% 正文的宋体细一档，在句中看着像掉出了正文字体。交付说明里自述「正文小四宋体」，
-% 与它对不上，故这里把 CJK 等宽并回正文的宋体。拉丁部分不受影响——\setmonofont
-% 仍是 Courier New，只有汉字回宋体。全篇含汉字的 \texttt 共 7 处（p21/p73/p76/p77）。
+% 于是「\texttt{结果提交表-已填写.xlsx}」这类含汉字的文件名会一半仿宋、一半
+% Courier：汉字笔画比正文的宋体细一档，在句中看着像掉出了正文字体。附件 2
+% 《论文格式规范》明令「论文中其他汉字一律采用小四号宋体字」，仿宋与之对不上，
+% 故这里把 CJK 等宽并回正文的宋体。拉丁部分不受影响——\setmonofont 仍是
+% Courier New，只有汉字回宋体。全篇含汉字的 \texttt 共 5 处（第 5 章一处、
+% 附录 A 两处、附录 C 两处），落点物理页 p21/p73/p77，为 2026-09-26 实测值；
+% 页数一变这串数字就会过期，届时用 _probe/find_tt.py 重测，勿把此处当索引。
 % 加 \IfFontExistsTF 保护：非 Windows 平台无 SimSun，维持 ctex 各自字体集的默认。
 \IfFontExistsTF{SimSun}{\setCJKmonofont{SimSun}}{}
 
