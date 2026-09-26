@@ -404,6 +404,238 @@ def fig_q2_gantt():
     save(fig, 'fig_q2_gantt.png')
 
 
+def fig_q2_traj_evolution():
+    """问题二的三维航迹按 0--40 / 40--80 / 80--120 min 三段切开叠在地形上。
+
+    甘特图回答「什么时候飞」，本图回答「飞在哪儿」：把交付方案的 24 条航迹按
+    Δt = 1 s 逐点采样后按时间窗切段，颜色即机型，虚线是投送完成后的返航段。
+
+    **为什么只有一行面板**：全工程只有这一套方案有逐架次的路线与时刻落盘
+    （results/q2_transport_trips.csv 与 q2_box_delivery.csv）。q2_scan.csv、
+    q2_pareto.csv 只有汇总指标，复现不出第二条策略的轨迹——照搬一个「对照策略」
+    的行轴就是编造，故本图不做多策略对照。
+
+    **「在飞」用哪个口径**：按「架次区间与窗口有重叠」算是 16/16/7，但首窗里
+    有三条只采到 1 个点（它们此刻仍在地面做装载准备），画不出航迹。故图内标注
+    与正文一律用**可绘出航迹**的口径 13/14/7 —— 这正是画出来的那个集合，图与
+    标签不可能各说一套。三窗之和 34 > 24 是正常的：单架次耗时跨过 40 min 的
+    分段边界，会被相邻两窗各记一次。
+
+    **返航段的切分**：sample_trip_trajectory 在下降段与悬停段写入的 (lon, lat)
+    逐字等于服务区节点坐标，故切点取「最后一个落在本架次 route 内某服务区节点
+    坐标上的采样点」，其后的后缀即返航段。不能用「等于 O01 坐标」去找切点——
+    起点那一点与终点都等于 O01。
+
+    **内建门禁**（不符即 assert 失败）：架次数 / 机型构成 / 箱数 / 完工时刻 /
+    总能耗 / 跨区架次 / 三窗可绘架次，七项全部与结果表逐位对齐。图与交付表
+    各说一套，比没有这张图更坏。
+    """
+    import matplotlib.patheffects as pe
+    from matplotlib.ticker import MaxNLocator
+    from core import load_data
+    from q2 import precompute_geometry
+    import q3
+
+    d = load_data()
+    d.geo_nodes, d.geo = precompute_geometry(d)
+
+    tp = rd('q2_transport_trips.csv')
+    bd = rd('q2_box_delivery.csv')
+
+    trips = []
+    for _, r in tp.iterrows():
+        trips.append(dict(
+            tid=r['架次编号'], type=r['机型编号'], t0=float(r['开始时刻s']),
+            route=[s.strip() for s in str(r['访问服务区顺序']).split('->') if s.strip()],
+            ret=float(r['返回O01时刻s']), E=float(r['架次能耗kWh'])))
+    trips.sort(key=lambda x: x['t0'])
+    boxes_at = {x['tid']: {} for x in trips}
+    for (tid, sid), g in bd[bd['架次编号'].isin(boxes_at)].groupby(
+            ['架次编号', '服务区编号']):
+        boxes_at[tid][sid] = list(g['货箱编号'])
+
+    # ---- 门禁 1：与结果表逐位对齐（完工时刻与总能耗另与论文宏的取值对齐） ----
+    with open(os.path.join(RES, 'paper_metrics.json'), encoding='utf-8') as f:
+        mm = json.load(f)
+    assert len(trips) == 24, '架次数 = %d，应为 24' % len(trips)
+    mix = {}
+    for x in trips:
+        mix[x['type']] = mix.get(x['type'], 0) + 1
+    assert mix == {'A': 11, 'B': 7, 'C': 6}, '机型构成 = %r' % mix
+    n_box = sum(len(v) for b in boxes_at.values() for v in b.values())
+    assert n_box == 80, '箱数 = %d，应为 80' % n_box
+    mk = max(x['ret'] for x in trips)
+    assert abs(mk - float(mm['QtwoMakespan']['value'])) <= 0.05, '完工 = %.3f' % mk
+    tot_e = sum(x['E'] for x in trips)
+    assert abs(tot_e - float(mm['QtwoEnergy']['value'])) <= 5e-4, '能耗 = %.6f' % tot_e
+    for x in trips:
+        assert set(x['route']) == set(boxes_at[x['tid']]), \
+            '架次 %s 的路线与箱表不符' % x['tid']
+    multi = {x['tid']: x['route'] for x in trips if len(x['route']) > 1}
+    assert set(multi) == {'T08', 'T12', 'T21'}, '跨区架次 = %r' % sorted(multi)
+    assert (multi['T08'] == ['S010', 'S014'] and multi['T12'] == ['S001', 'S010']
+            and multi['T21'] == ['S011', 'S008']), '跨区架次路线 = %r' % multi
+
+    # ---- 轨迹采样与返航切点 ----
+    WINS = [(0.0, 2400.0, '0--40 min'), (2400.0, 4800.0, '40--80 min'),
+            (4800.0, 7200.0, '80--120 min')]
+    traj, cut = {}, {}
+    for x in trips:
+        t_type = d.transport_types[x['type']]
+        P = np.array(q3.sample_trip_trajectory(d, t_type, x['route'],
+                                               boxes_at[x['tid']],
+                                               t0=x['t0'], dt=q3.DT_AUDIT),
+                     dtype=float)
+        traj[x['tid']] = P
+        nodes = {(round(d.si[s]['lon'], 9), round(d.si[s]['lat'], 9))
+                 for s in x['route']}
+        hit = [i for i in range(len(P))
+               if (round(P[i, 1], 9), round(P[i, 2], 9)) in nodes]
+        assert hit, '架次 %s 的轨迹里找不到任何服务区节点坐标' % x['tid']
+        cut[x['tid']] = hit[-1]
+
+    # ---- 门禁 2：三窗「可绘出航迹」的架次数与机型构成 ----
+    counts, mixes = [], []
+    for a, b, _ in WINS:
+        sel = [x for x in trips
+               if int(((traj[x['tid']][:, 0] >= a)
+                       & (traj[x['tid']][:, 0] <= b)).sum()) >= 2]
+        cm = {}
+        for x in sel:
+            cm[x['type']] = cm.get(x['type'], 0) + 1
+        counts.append(len(sel))
+        mixes.append({k: cm.get(k, 0) for k in 'ABC'})
+    assert counts == [13, 14, 7], '三窗可绘架次 = %r，应为 [13, 14, 7]' % counts
+    assert mixes == [{'A': 6, 'B': 4, 'C': 3}, {'A': 7, 'B': 4, 'C': 3},
+                     {'A': 3, 'B': 2, 'C': 2}], '三窗机型构成 = %r' % mixes
+
+    # ---- 地形：按服务区外包矩形裁窗后再降采样 ----
+    # 整幅 DEM 是 1309 x 1486，而本图只用到服务区与 O01 所在的一小块（约 14%）。
+    # 先裁后降采样，既省掉画不出来的面片，又不欠采样（stride=2 已实测分辨得住）。
+    dem = d.dem
+    lons = [s['lon'] for s in d.services] + [d.O01['lon']]
+    lats = [s['lat'] for s in d.services] + [d.O01['lat']]
+    PAD = 0.012
+    j0 = int((min(lons) - PAD - dem.lon_min) / dem.dlon)
+    j1 = int((max(lons) + PAD - dem.lon_min) / dem.dlon) + 1
+    i0 = int((dem.lat_max - (max(lats) + PAD)) / dem.dlat)
+    i1 = int((dem.lat_max - (min(lats) - PAD)) / dem.dlat) + 1
+    Z = dem._dem_nan[i0:i1, j0:j1][::2, ::2].astype(float)
+    z_fill = float(np.nanmin(Z))
+    Z = np.where(np.isnan(Z), z_fill, Z)
+    LON, LAT = np.meshgrid(dem.lon[j0:j1][::2], dem.lat[i0:i1][::2])
+    # 纵轴范围由数据定：下界取窗口地形最低点向下取整到 50 m，上界取「地形最高点」
+    # 与「全部航迹点的最高海拔」的较大者向上取整——巡航高度是「航段所经 DEM 最高
+    # 像元 + 50 m」，故它比任一单点地形都高，只按地形定上界会把巡航段切掉。
+    z_traj_max = max(float(P[:, 3].max()) for P in traj.values())
+    ZLO = math.floor(float(np.nanmin(dem._dem_nan[i0:i1, j0:j1])) / 50.0) * 50.0
+    ZHI = 50.0 * math.ceil((max(z_traj_max, float(np.nanmax(Z))) + 25.0) / 50.0)
+
+    s_lon = np.array([s['lon'] for s in d.services])
+    s_lat = np.array([s['lat'] for s in d.services])
+    s_alt = np.array([s['alt'] + 30.0 for s in d.services])
+
+    # ---- 垂向夸张：set_box_aspect 的 z 比例折算成「每 km 实距占多少显示长度」 ----
+    # 口径取**画出来的那个地形盒**（含外扩），不是服务区外包矩形：读者看到的是盒子。
+    mlon = 111320.0 * np.cos(np.deg2rad(0.5 * (LAT.min() + LAT.max())))
+    w_km = (LON.max() - LON.min()) * mlon / 1000.0
+    h_km = (LAT.max() - LAT.min()) * 111132.95 / 1000.0
+    exag = (0.5 / ((ZHI - ZLO) / 1000.0)) / (1.0 / h_km)
+    print('[口径] 垂向夸张 %.2f 倍（窗口实距 %.2f km x %.2f km，纵轴 %.0f--%.0f m，'
+          'set_box_aspect=(1.30, 1.0, 0.5)）' % (exag, w_km, h_km, ZLO, ZHI))
+    assert 5.0 < exag < 9.0, '垂向夸张 %.2f 倍超出预期' % exag
+
+    # ---- 出图 ----
+    fig = plt.figure(figsize=(10.6, 4.3))
+    axs, surf = [], None
+    for k, (a, b, label) in enumerate(WINS):
+        ax = fig.add_subplot(1, 3, k + 1, projection='3d')
+        # 关掉自动深度排序：默认按「多边形平均深度」把航迹与地形一起排序，而本图
+        # 的航迹大部分在 200~500 m 的谷地里，会被山脊成片盖住（首版实测：三条
+        # 面板上一条航迹都看不见，只剩一枚调度中心星标）。改为手工定序——地形在下、
+        # 航迹恒在上，配合半透明地形，既读得清航迹又保留了地形的纵深感。
+        ax.computed_zorder = False
+        axs.append(ax)
+        surf = ax.plot_surface(LON, LAT, Z, cmap='terrain', linewidth=0,
+                               antialiased=False, alpha=0.70, zorder=1,
+                               rcount=Z.shape[0], ccount=Z.shape[1])
+        ax.scatter(s_lon, s_lat, s_alt, s=20, color='#3A3A3A',
+                   edgecolor='white', lw=0.5, depthshade=False, zorder=4)
+        ax.scatter([d.O01['lon']], [d.O01['lat']], [d.O01['alt']], marker='*',
+                   s=260, color='gold', edgecolor='black', lw=0.7, depthshade=False,
+                   zorder=6)
+
+        for x in trips:
+            P = traj[x['tid']]
+            m = np.where((P[:, 0] >= a) & (P[:, 0] <= b))[0]
+            if len(m) < 2:
+                continue
+            lo, hi, c = int(m[0]), int(m[-1]), cut[x['tid']]
+            for lo2, hi2, sty in ((lo, min(hi, c), '-'), (max(lo, c), hi, '--')):
+                if hi2 <= lo2:
+                    continue
+                s = P[lo2:hi2 + 1]
+                ln, = ax.plot(s[:, 1], s[:, 2], s[:, 3], color=TYPE_COLOR[x['type']],
+                              lw=1.25, ls=sty, alpha=0.95, zorder=7)
+                # 白描边：地形底色深浅不一，不加这层，浅绿地形上的 B 型绿线读不出来
+                ln.set_path_effects([pe.withStroke(linewidth=2.6, foreground='white',
+                                                   alpha=0.9)])
+
+        cm = mixes[k]
+        ax.text2D(0.03, 0.94,
+                  '可绘航迹 %d 架次\nA×%d  B×%d  C×%d'
+                  % (counts[k], cm['A'], cm['B'], cm['C']),
+                  transform=ax.transAxes, fontsize=10.5, va='top', ha='left',
+                  bbox=dict(fc='white', ec='#BBBBBB', alpha=0.85,
+                            boxstyle='round,pad=0.3'))
+        ax.set_zlim(ZLO, ZHI)
+        ax.set_zlabel('海拔 (m)', fontsize=10)
+        # 经纬度只在 (a) 面板给刻度文字：三块面板同一片地形、同一个视角，重复三遍
+        # 只是噪声，而 3D 的刻度文字带旋转，占的正是航迹要用的横向空间。
+        ax.xaxis.set_major_locator(MaxNLocator(4))
+        ax.yaxis.set_major_locator(MaxNLocator(4))
+        ax.zaxis.set_major_locator(MaxNLocator(5))
+        if k == 0:
+            ax.set_xlabel('经度 (°)', fontsize=10)
+            ax.set_ylabel('纬度 (°)', fontsize=10)
+        else:
+            ax.set_xticklabels([])
+            ax.set_yticklabels([])
+        ax.tick_params(labelsize=9)
+        ax.set_title(label, fontsize=13)
+        ax.view_init(elev=28, azim=-58)
+        ax.set_box_aspect((1.30, 1.0, 0.5))
+        panel_tag(ax, '(%s)' % 'abc'[k], dx=0.02, dy=0.97)
+
+    # 色条走**横版、摆在面板下方**，右缘留给 (c) 面板的 z 轴。竖直色条试过两次：
+    # 3D 轴把自己的 z 轴刻度与轴名画在坐标区**之外**（azim=-58 时落在各面板右侧），
+    # 而 fig.colorbar(ax=[...]) 只能按坐标区的名义包围盒划走一条竖带，实测两次都
+    # 压到 (c) 的 z 刻度上。横版放在水下（面板）与图例之间，两者互不相干。
+    # 下方留出三段互不重叠的横带：面板（bottom=0.25 以上）→ 色条 → 图例。
+    # 4.3 in 高是为此从计划的 4.0 in 抬上来的：色条刻度与轴名要占约 0.05 个图高，
+    # 4.0 in 下它与图例在垂直方向必然叠字（实测两版都如此）。
+    fig.subplots_adjust(wspace=-0.08, left=0.0, right=0.94, top=0.90, bottom=0.25)
+    cax = fig.add_axes([0.33, 0.155, 0.34, 0.020])
+    cb = fig.colorbar(surf, cax=cax, orientation='horizontal')
+    cb.set_label('高程 (m)', fontsize=10)
+    # 横版色条的轴名默认落在刻度**下方**，正好压住图例那一行（实测两版都叠字）；
+    # 翻到色条上方，那里到面板下缘之间是空的。
+    cb.ax.xaxis.set_label_position('top')
+    cb.ax.tick_params(labelsize=9)
+    fig.legend(handles=[Line2D([], [], color=TYPE_COLOR[c], lw=2.0,
+                               label='机型 %s' % c) for c in 'ABC']
+                       + [Line2D([], [], color='#555555', lw=2.0, ls='--',
+                                 label='返航段'),
+                          Line2D([], [], marker='*', ms=13, ls='', color='gold',
+                                 mec='black', mew=0.6, label='调度中心')],
+               loc='lower center', ncol=5, frameon=False, fontsize=11,
+               bbox_to_anchor=(0.5, 0.0))
+    print('[自校验] %d 架次 / %d 箱 / 完工 %.3f s / 三窗可绘 %s 架次 —— '
+          '与 q2_transport_trips.csv 逐项相符'
+          % (len(trips), n_box, mk, '-'.join(str(c) for c in counts)))
+    save(fig, 'fig_q2_traj_evolution.png')
+
+
 def _ribbon(ax, x0, x1, ya0, ya1, yb0, yb1, color, alpha=0.5):
     """一根桑基带：从 (x0, [ya0, ya1]) 流向 (x1, [yb0, yb1]) 的三次贝塞尔。"""
     from matplotlib.path import Path
@@ -2100,6 +2332,7 @@ def main():
     fig_q1_payload()
     fig_q2_alns()
     fig_q2_gantt()
+    fig_q2_traj_evolution()
     fig_q2_sankey()
     fig_q2_exact()
     fig_q3_timeline()

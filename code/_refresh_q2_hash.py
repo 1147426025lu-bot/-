@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+# 本程序及代码是在人工智能工具辅助下完成的。
+# 工具名称：DeepSeek；版本/型号：DeepSeek V4.1 Flash（API 模型名 deepseek-flash）；
+# 开发机构：杭州深度求索人工智能基础技术研究有限公司；
+# 版本发布日期：2026 年 9 月 10 日。
 # 一次性脚本：刷新 results/q2_solution.json 里的 solver_hashes。
 #
 # 背景：q2 于 20:32 跑完并落盘，之后为了修问题三导出崩掉的那行
