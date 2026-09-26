@@ -599,7 +599,11 @@ def _q3_context():
     with open(os.path.join(RES, 'q3_solution.json'), encoding='utf-8') as f:
         sol = json.load(f)
     box_by_id = {b['id']: b for bs in d.boxes_by_service.values() for b in bs}
-    assignment = [dict(type=t['type'], route=list(t['route']), start=float(t['start']),
+    # tid 与 base_start 一并带出：`原开始时刻s` 在 CSV 里只留 3 位小数，而问题二
+    # 基线时刻正是「优化前后对照图」第 (a) 行要用的量，取全精度的 base_start 才不会
+    # 让重算出的直连/中断在边界采样点上因舍入而翻面。
+    assignment = [dict(tid=t['trip_id'], type=t['type'], route=list(t['route']),
+                       start=float(t['start']), base_start=float(t['base_start']),
                        boxes_at={s: [box_by_id[x] for x in ids]
                                  for s, ids in t['box_ids_by_service'].items()})
                   for t in sorted(sol['transport_trips'], key=lambda t: t['start'])]
@@ -645,14 +649,29 @@ def fig_q3_timeline():
     ax = axes[1]
     ruavs = sorted(rt['中继无人机编号'].unique())
     ry = {u: i for i, u in enumerate(ruavs)}
-    for _, r in rt.iterrows():
-        y = ry[r['中继无人机编号']]
-        ax.barh(y, r['服务结束时刻s'] - r['开始时刻s'], left=r['开始时刻s'],
+    # 一行 = 一次悬停站服务，而出动级的 `开始时刻s`/`返回O01时刻s` 在同一次出动的
+    # 各行上取同值、`服务结束时刻s` 才是逐站推进的。逐行画会在同一个 y、同一个 x
+    # 上叠出多根等长条，并把几个 `R03@S05` 标签压成一团（阶段 13 起一次出动可连做
+    # 多站）。故先按 `出动编号` 归并成一次出动一根条：实体段取 [首次开始, 末次服务
+    # 结束]、返航段取 [末次服务结束, 返回O01]，标签把该趟服务过的站一次列全。
+    if '出动编号' in rt.columns:
+        bars = [(g['中继无人机编号'].iloc[0], float(g['开始时刻s'].min()),
+                 float(g['服务结束时刻s'].max()), float(g['返回O01时刻s'].iloc[0]),
+                 '%s@%s' % (g['中继架次编号'].iloc[0],
+                            '→'.join(str(s) for s in g['悬停站编号'])))
+                for _, g in rt.groupby('出动编号', sort=False)]
+    else:
+        bars = [(r['中继无人机编号'], float(r['开始时刻s']), float(r['服务结束时刻s']),
+                 float(r['返回O01时刻s']),
+                 '%s@%s' % (r['中继架次编号'], r['悬停站编号']))
+                for _, r in rt.iterrows()]
+    for uav, t0, svc_end, t_ret, lab in bars:
+        y = ry[uav]
+        ax.barh(y, svc_end - t0, left=t0,
                 height=0.5, color=C_RELAY, edgecolor='black', lw=0.5, zorder=3)
-        ax.barh(y, r['返回O01时刻s'] - r['服务结束时刻s'], left=r['服务结束时刻s'],
+        ax.barh(y, t_ret - svc_end, left=svc_end,
                 height=0.5, color=C_RELAY, alpha=0.35, edgecolor='black', lw=0.5, zorder=3)
-        ax.text(r['开始时刻s'] + 60, y, '%s@%s' % (r['中继架次编号'], r['悬停站编号']),
-                va='center', fontsize=10, zorder=4)
+        ax.text(t0 + 60, y, lab, va='center', fontsize=10, zorder=4)
     ax.set_yticks(list(ry.values())); ax.set_yticklabels(ruavs)
     ax.set_xlabel('时间 (s)'); ax.set_ylabel('中继无人机')
     # 纵轴下限留 1.0（原 -0.7）：图例放 lower right 时其顶边只到 axes 分数 ~0.10，
@@ -845,8 +864,16 @@ def fig_q4_resource():
     ax.set_title('现有库存下的资源缺口')
     # 图例放 upper center：那一带是类目中部，配合上面的余量后不会与任何柱顶相撞。
     ax.legend(fontsize=11, loc='upper center')
-    # 红字放在左下方，让开 upper center 的图例与坐标区左上角的 (b) 编号
-    ax.text(0.03, 0.72, '1023 / 28501 个分区中\n库存可行者 0 个',
+    # 红字放在左下方，让开 upper center 的图例与坐标区左上角的 (b) 编号。
+    # 分区数按 K 现数、不写死：这里曾写「1023 / 28501」，是早先较粗的原子单元划分下的
+    # 数字，比正文 8.3 节与 q4_all_partitions.csv 的 2047 / 86526 少一半还多。
+    allp = rd('q4_all_partitions.csv')
+    n_part = {K: int((allp['K'] == K).sum()) for K in (2, 3)}
+    n_feas = {K: int(cmp.loc[K, '库存可行分区数']) for K in (2, 3)}
+    assert n_feas[2] == 0 and n_feas[3] == 0, \
+        '库存可行分区数不再是 0（K=2:%d，K=3:%d），本图红字须重写' % (n_feas[2], n_feas[3])
+    ax.text(0.03, 0.72, '%d / %d 个分区中\n库存可行者 %d 个'
+            % (n_part[2], n_part[3], n_feas[2]),
             transform=ax.transAxes, fontsize=12.5, color=C_C, fontweight='bold', va='top')
     panel_tag(ax, '(b)')
 
@@ -854,43 +881,36 @@ def fig_q4_resource():
     save(fig, 'fig_q4_resource.png')
 
 
-def fig_q4_partition():
-    """(a) K=2 最优分区地图 (b) 原子单元工作量网络 (c) 全部分区的资源规模分布。"""
-    part = rd('q4_partition.csv')
-    units = rd('q4_units.csv')
-    allp = rd('q4_all_partitions.csv')
-    # 架次→服务区取自**问题三的最终运输方案**：问题四就是从这张表出发做绑定的，
-    # 图与解同源。列名与问题二那张表一致（架次编号 / 访问服务区顺序）。
-    tp = rd('q3_transport_trips.csv')
+def _partition_map(ax, d, pos, part, K, tag, R):
+    """一个 K 下的最优分区地图：服务区按任务组着色，标题与图例全部从结果表推。
 
-    fig, axes = plt.subplots(1, 3, figsize=(10.8, 3.9))
-
-    # (a) 地图：两个任务组的服务区用不同色系，标出各自组号
-    from core import load_data
-    d = load_data()
-    pos = {s['id']: (s['lon'], s['lat']) for s in d.services}
-    ax = axes[0]
+    标题与图例一律**从结果表推**，不写字面量。这里曾写死「R=30」「任务组 1（13 个
+    服务区）」「任务组 2（S009, S012）」：阶段 12 重解后实际是 R=29、组 1 有 14 个
+    服务区、组 2 只有 S009，三个字面量全部过期，图与正文对不上却没有任何报错——
+    正是「图与解同源」这条纪律要防的事故。
+    """
     dem = d.dem._dem_nan
     ax.imshow(dem, extent=[d.dem.lon_min, d.dem.lon_max, d.dem.lat_min, d.dem.lat_max],
               origin='upper', cmap='Greys', aspect='auto', alpha=0.45)
-    p2 = part[part['K'] == 2]
-    gcol = {1: '#C44E52', 2: '#4C72B0'}
-    for _, r in p2.iterrows():
+    pk = part[part['K'] == K]
+    # 组号 1/2/3 固定配色，K=2 时只用前两色——与 K=3 面板并排看时同组号同色
+    gcol = {1: '#C44E52', 2: '#4C72B0', 3: '#55A868'}
+    for _, r in pk.iterrows():
         for sid in str(r['服务区列表']).split(','):
             if sid in pos:
-                ax.plot(*pos[sid], 'o', ms=13, color=gcol[r['任务组编号']],
+                ax.plot(*pos[sid], 'o', ms=11, color=gcol[r['任务组编号']],
                         mec='black', mew=0.7, zorder=4)
                 # 保留 S 前缀：本图与 fig_q2_flow 是同一批服务区，那边写 S001，
                 # 这边若只写 001，读者会以为又是另一套编号。
-                ax.text(pos[sid][0], pos[sid][1] + 0.0022, sid, fontsize=8.5,
+                ax.text(pos[sid][0], pos[sid][1] + 0.0022, sid, fontsize=7.8,
                         ha='center', zorder=5)
-    ax.plot(d.O01['lon'], d.O01['lat'], '*', ms=20, color='gold', mec='black', mew=0.9,
+    ax.plot(d.O01['lon'], d.O01['lat'], '*', ms=18, color='gold', mec='black', mew=0.9,
             zorder=6)
     # 写「调度中心」而不是 O01：这个星标旁边就是服务区 S001 的标签，两者都写成
     # 三位数字会看混。标签摆在星标**右侧**（数据坐标 +0.006°，约 15 pt，大于星标
     # 10 pt 的半径）：原先放在正下方会顶住星标的下尖角，实测截图确认压字；而
     # (109.237~109.253, 23.0085) 一带没有任何服务区，横向摆放不会撞上别的标号。
-    ax.text(d.O01['lon'] + 0.006, d.O01['lat'], '调度中心', fontsize=10, ha='left',
+    ax.text(d.O01['lon'] + 0.006, d.O01['lat'], '调度中心', fontsize=9, ha='left',
             va='center', fontweight='bold', zorder=6)
     ax.set_xlim(min(p[0] for p in pos.values()) - 0.01,
                 max(p[0] for p in pos.values()) + 0.01)
@@ -902,20 +922,49 @@ def fig_q4_partition():
     ax.set_ylim(min(p[1] for p in pos.values()) - 0.030,
                 max(p[1] for p in pos.values()) + 0.012)
     ax.set_xlabel('经度 (°)'); ax.set_ylabel('纬度 (°)')
-    ax.set_title('K=2 最优分区（R=30）')
-    ax.legend(handles=[Patch(color=gcol[1], label='任务组 1（13 个服务区）'),
-                       Patch(color=gcol[2], label='任务组 2（S009, S012）')],
-              loc='lower left', fontsize=9.5)
-    panel_tag(ax, '(a)')
+    ax.set_title('$K=%d$ 最优分区（$R=%d$）' % (K, R))
+    ax.legend(handles=[Patch(color=gcol[k],
+                             label='任务组 %d（%d 个服务区）'
+                                   % (k, len(str(pk[pk['任务组编号'] == k]['服务区列表'].iloc[0]).split(','))))
+                       for k in sorted(pk['任务组编号'].unique())],
+              loc='lower left', fontsize=9)
+    panel_tag(ax, tag)
 
-    # (b) 原子单元网络：节点面积 ∝ 工作量，边 = 两个单元被同一个中继悬停站保障。
+
+def fig_q4_partition():
+    """(a) K=2 最优分区地图 (b) K=3 最优分区地图 (c) 原子单元工作量网络
+    (d) 全部分区的资源规模分布。
+
+    两个 K 各占一格而不是只画 K=2：(b) 的「一个大组 + 两个小组」正是
+    §8 里「K=3 均衡度反而更差」的直接来源，只画 K=2 时这句话没有图可看。
+    """
+    part = rd('q4_partition.csv')
+    units = rd('q4_units.csv')
+    allp = rd('q4_all_partitions.csv')
+    # 架次→服务区取自**问题三的最终运输方案**：问题四就是从这张表出发做绑定的，
+    # 图与解同源。列名与问题二那张表一致（架次编号 / 访问服务区顺序）。
+    tp = rd('q3_transport_trips.csv')
+    # 两处 R 都从 q4_comparison.csv 读——R 是重解后会变的量，写进标题里就是下一个
+    # 「图与正文对不上却无人报错」的隐患。
+    _cmp = rd('q4_comparison.csv').set_index('K')
+
+    fig, axes = plt.subplots(2, 2, figsize=(10.8, 7.6))
+
+    # (a)(b) 地图：两个 K 下的最优分区
+    from core import load_data
+    d = load_data()
+    pos = {s['id']: (s['lon'], s['lat']) for s in d.services}
+    _partition_map(axes[0][0], d, pos, part, 2, '(a)', int(_cmp.loc[2, '资源规模R']))
+    _partition_map(axes[0][1], d, pos, part, 3, '(b)', int(_cmp.loc[3, '资源规模R']))
+
+    # (c) 原子单元网络：节点面积 ∝ 工作量，边 = 两个单元被同一个中继悬停站保障。
     # 边判据必须真的落在两个**端点**上：原先写作 `s1 = {所有站}; if s1:`，s1 与
     # u1/u2 毫无关系、恒为非空，于是每个单元对都连边，画出来是完全图——一团线，
     # 看不出任何结构，等于没画。这里改成经「架次 → 所属单元」反查各站服务了哪些
     # 单元，再在**同站服务的单元**之间连边。
     import networkx as nx
     import itertools
-    ax = axes[1]
+    ax = axes[1][0]
     rel = rd('q3_intervals.csv')
     G = nx.Graph()
     for _, r in units.iterrows():
@@ -940,106 +989,169 @@ def fig_q4_partition():
                 G[u1][u2]['st'].append(stn)
             else:
                 G.add_edge(u1, u2, st=[stn])
-    # 布局：这张图天然是两个连通分量（共用 S01 的一簇、共用 S03 的一簇），
-    # spring_layout 对不连通图会把每个分量各自缩成一团、节点全部叠在一起，
-    # 故按分量摆成两个圆环——位置完全确定，也把「两簇」这个结构画出来了。
+    # 布局：spring_layout 对不连通图会把每个分量各自缩成一团、节点全部叠在一起，
+    # 故按分量摆成圆环——位置完全确定，不依赖求解器。
+    # 分量是**四个**（5 / 3 / 3 / 1 个单元；由 q4_units.csv 的单元与 q3_intervals.csv
+    # 的共用悬停站推出）。早先按一行摆开、簇距 1.95、xlim 却写死 ±2.15 —— 12 个原子
+    # 单元里 6 个被裁到画外，5 单元那一簇只在左边界露出一牙绿弧。图与正文「12 个原子
+    # 单元」直接冲突，且越界不报错、只是安静地少画。现在坐标边界一律在**版面定稿后**
+    # 按实际摆位反推（见函数末尾），并配一条越界断言。
+    # 只能**单行四簇**：本面板宽而扁（定稿后坐标区约 290 pt × 184 pt），改成 2×2 时
+    # 每簇的纵向预算只剩约 92 pt，装不下「圆环 + 簇名 + 图内说明」。
     comps = sorted((sorted(c) for c in nx.connected_components(G)), key=len, reverse=True)
+    RING, CSP = 1.00, 1.80
     posn, comp_cx = {}, {}
     for ci, comp in enumerate(comps):
         # **不能用 nx.circular_layout(G.subgraph(comp))**：networkx 3.7 的 subgraph
         # 视图把节点名收进 set，其迭代序随 PYTHONHASHSEED 逐进程变化——实测同一份数据
         # 两次出图，3 节点那一簇的顺序一次是 ['U07','U01','U06']、另一次是 U01 打头，
-        # 于是 U01 一会儿在左上、一会儿甩到最右侧（最右时它的「S001, S010」标还越出
-        # 坐标区被裁掉）。布局不可复现，纯净目录闭环复检的逐字节比对会直接失败。
-        # 这里按已经排好序的 comp 手算圆环，公式与 circular_layout 完全一致
-        # （θ = 2πk/n、半径 0.62），但顺序是确定的。
+        # 于是 U01 一会儿在左上、一会儿甩到最右侧。布局不可复现，纯净目录闭环复检的
+        # 逐字节比对会直接失败。这里按已经排好序的 comp 手算圆环，公式与 circular_layout
+        # 完全一致（θ = 2πk/n），但顺序是确定的。
+        cx = (ci - (len(comps) - 1) / 2.0) * CSP
         n = len(comp)
-        dx = (ci - (len(comps) - 1) / 2.0) * 1.95
         for k, node in enumerate(comp):
             th = 2.0 * math.pi * k / n
-            posn[node] = (0.62 * math.cos(th) + dx, 0.62 * math.sin(th))
-        comp_cx[ci] = dx
-    sizes = [G.nodes[n]['w'] * 300 + 600 for n in G.nodes()]
-    # 边上一律不写字：本例每个连通分量恰好只共用**一个**中继悬停站（两簇分别是
-    # S01 与 S03），逐边写「S01」会沿边旋转、且正好压在节点下方的服务区清单上
-    # ——实测截图里「S003, S006」被斜排的 S01 压掉半行。改成每簇正上方写一次簇名，
-    # 信息一点没少（本来就是整簇同站），排版干净。若某簇真跨多个站，下面那行会
-    # 自动退化成「S01/S02」。
+            # 单点分量摆在簇心：按 cos/sin 摆会被推到簇心右侧 RING，看着像摆歪了
+            posn[node] = (RING * math.cos(th) + cx if n > 1 else cx,
+                          RING * math.sin(th) if n > 1 else 0.0)
+        comp_cx[ci] = cx
+    # 节点面积系数 100/300：四簇并排时每簇横向只有约 65 pt，5 节点簇相邻节点的弦长约
+    # 43 pt，系数再大，簇内最大节点（2.6113 h）就会吃满整个弦长、和邻节点糊在一起。
+    sizes = [G.nodes[n]['w'] * 100 + 300 for n in G.nodes()]
+    # 边上一律不写字：逐边写「S01」会沿边旋转、且正好压在节点上，改成每簇正上方写一次
+    # 簇名（本来就是整簇同站），信息一点没少。
     nx.draw_networkx_edges(G, posn, ax=ax, alpha=0.55, edge_color='#8A8A8A',
                            width=3.0)
     nx.draw_networkx_nodes(G, posn, ax=ax, node_size=sizes, node_color=C_B,
                            edgecolors='black', linewidths=0.8, alpha=0.9)
-    # 工作量写在节点里（面积本来就编码工作量，写出来便于读数），服务区列在节点下方
-    nx.draw_networkx_labels(G, posn, ax=ax,
-                            labels={n: '%.1fh' % G.nodes[n]['w'] for n in G.nodes()},
+    # 节点里只写**单元编号**：工作量已由面积编码，精确值与服务区清单都在 §8.1 的表里。
+    # 旧版把「2.6h」和两行服务区清单一并画进节点，四簇并排的宽度下根本放不下——实测
+    # 第二簇的服务区清单和第一簇的簇名互相压掉，字叠成一团。
+    nx.draw_networkx_labels(G, posn, ax=ax, labels={n: n for n in G.nodes()},
                             font_size=8.5)
-    # 清单必须带**白底**：它画在节点正下方 0.40 处，而 circular_layout 的菱形/三角形
-    # 布局里「正下方」恰是同分量内另一个节点的方向（间距 1.24），那条边正好落在清单
-    # 中央——实测左簇的「S003, S006 / S007, S015」被 3.3h↔0.7h 的竖边穿过（x=−0.975），
-    # 右簇的「S001, S010 / S013, S014」被 3.2h↔0.4h 的竖边穿过（x=0.665）。加白底后
-    # 清单压在边之上，与布局无关，换任何排布都不会再被穿字。
-    nx.draw_networkx_labels(
-        G, {n: (posn[n][0], posn[n][1] - 0.40) for n in G.nodes()}, ax=ax,
-        labels={n: G.nodes[n]['lab'] for n in G.nodes()}, font_size=8.5,
-        bbox=dict(facecolor='white', edgecolor='none', alpha=0.85, pad=0.6))
+    _ttl = []
     for ci, comp in enumerate(comps):
         sub = G.subgraph(comp)
         stns = sorted({s for u, v in sub.edges() for s in G[u][v]['st']})
-        if stns:
-            ax.text(comp_cx[ci], 1.06, '共用悬停站 %s' % '/'.join(stns),
-                    ha='center', fontsize=10.5, color=C_A, fontweight='bold')
-    # 节点面积的含义写在坐标区内左下角，不塞进标题——标题一长就会横向伸进
-    # 相邻面板（实测原标题 25 字宽 5.0 in，而单栏只有 3.3 in，直接压住 (c) 的标题）。
-    ax.text(-1.90, -1.20, '节点面积 ∝ 工作量', fontsize=9.5, color='#4A4A4A')
-    # 上限由 1.95 放宽到 2.15：圆环最右节点落在 dx+0.62 = 1.595，而它下方那行服务区
-    # 清单（U01 的「S001, S010」，8.5 pt 下宽约 38 pt）在单栏 3.2 in ≈ 230 pt 的坐标区
-    # 里要占 ±0.37 data，右端到 1.965 —— 按 1.95 时最后一个数字被坐标区裁掉（实测
-    # 截图末字只剩半边）。2.15 留出 0.19 data ≈ 10 pt 净空；横向压缩只有 9%，
-    # 节点只是略扁，肉眼无差别。
-    ax.set_xlim(-2.15, 2.15); ax.set_ylim(-1.32, 1.24)
+        # 簇名以**本簇最高节点**为基准上移：5 节点簇的顶节点在 0.951R、3 节点簇在
+        # 0.866R，写死一个绝对 y 会让簇名一高一低，看着像摆歪了。
+        # 簇名只写站号，不写「共用悬停站」四个字：后者 20 字实测约 190 pt，而相邻簇心
+        # 间距只有约 65 pt，画出来会整块盖住下一簇的簇名。这层语义改由坐标区底部的
+        # 图内说明交代。
+        # 孤立点（U06：其运输架次在 q3_intervals.csv 里没有任何失效区间，全程直连）
+        # 没有边，取不到共用站，如实标成「无失效区间」——空着会被读成漏画。
+        _ttl.append('/'.join(stns) if stns else '无失效区间')
+        ax.text(comp_cx[ci], max(posn[n][1] for n in comp) + 0.34, _ttl[ci],
+                ha='center', va='bottom', fontsize=9.5, color=C_A,
+                fontweight='bold')
+    # 坐标边界、以及那行图内说明，一律留到 tight_layout **之后**再定：tight_layout
+    # 之前量到的是默认网格里那一格的位置，与定稿后的坐标区差得很远。
     ax.set_title('原子任务单元与共用中继站')
     ax.axis('off')
-    panel_tag(ax, '(b)')
+    panel_tag(ax, '(c)')
 
-    # (c) 全部分区的 R 分布：最优解离其余解有多远、可行解是否存在，一眼可见
-    ax = axes[2]
+    # (d) 全部分区的 R 分布：最优解落在分布的哪个位置，一眼可见。
+    # 纵轴用**占比**而不是分区个数：两档分区数相差 42 倍（2047 / 86526），放在同一条
+    # 计数轴上，K=2 的柱高不到 K=3 的 3%——图例写着「K = 2」却在图上看不到任何蓝色，
+    # 等于图在说一件读者看不见的事。占比把两档拉回同一量级，绝对条数移进图例。
+    ax = axes[1][1]
     vmax = {}
     for K, col in ((2, C_A), (3, C_C)):
         v = allp[allp['K'] == K]['资源规模R']
-        cnt, _, _ = ax.hist(v, bins=range(int(v.min()), int(v.max()) + 2), alpha=0.62,
+        cnt, _, _ = ax.hist(v, bins=range(int(v.min()), int(v.max()) + 2),
+                            weights=np.full(len(v), 100.0 / len(v)), alpha=0.62,
                             color=col, edgecolor='black', lw=0.5,
                             label='K = %d（%d 个分区）' % (K, len(v)))
-        vmax[K] = (v, cnt.max())
-    # 两条「最优 R」标注都摆在所有柱子之上、各自向左上错开：K=3 的柱比 K=2 高得
-    # 多，若照柱子高度随手放，标注会埋进柱子里。先量出柱高再定位置。
-    top = max(m for _, m in vmax.values())
-    # 上限 1.70 倍柱高：只为把右上角图例顶到顶部、给下面两条标注腾地方（1.45 倍时
-    # 图例下沿落在 data 51，正好压住标注）。
+        vmax[K] = (float(v.min()), float(cnt.max()))
+    # 两条「最优 R」标注都摆在柱顶之上、各自错开：先量出两档的峰高再定位置。
+    top = max(m for _v, m in vmax.values())
+    # 上限 1.70 倍峰高：只为把右上角图例顶到顶部、给下面两条标注腾地方。
     ax.set_ylim(0, top * 1.70)
-    # 两条标注**不能摆在柱顶之上那一条**：实测图例包围盒是 x:[32.84, 50.33]、
-    # y:[54.73, 72.10]（探针量出，非目测），而「最优 R=30」在 y=top*1.50=66 处占
-    # x:[30.50, 37.08]、y:[63.29, 68.71]，整块落在图例里被白底洗淡；「最优 R=34」
-    # 在 y=top*1.25=55 处占 y:[52.29, 57.71]，同样啃到图例下沿。
-    # 改摆进「柱顶之上、图例之下」那条空带（x 从 30.5 到 41 之间的柱高最多 14，
-    # R=41 那根最高也才 38）：蓝在 0.67、红在 0.56 倍上限，上下错开 3 data 单位以上。
+    # 两条标注**不能摆在柱顶之上那一条**：实测图例包围盒横跨 x:[32.84, 50.33]，
+    # 摆在 y = top*1.50 处的「最优 R=29」整块落在图例里被白底洗淡；「最优 R=33」
+    # 在 y = top*1.25 处又啃到图例下沿。改摆进「柱顶之上、图例之下」那条空带
+    # （x 从 30 到 41 之间的柱高都远低于峰高），蓝在上、红在下，上下错开。
     ymax = ax.get_ylim()[1]
     for K, col in ((2, C_A), (3, C_C)):
-        v, m = vmax[K]
-        ax.axvline(v.min(), color=col, ls='--', lw=2.0)
+        vmin, _m = vmax[K]
+        ax.axvline(vmin, color=col, ls='--', lw=2.0)
         # 标注紧贴各自的虚线右侧；不再画箭头（原来的箭头指向该 K 的最高柱顶，
         # 与实际想指的「虚线＝最优 R」并不一致，反而引错视线）。白底是必要的：
-        # 「最优 R=30」横跨 x:[30.5, 37.1]，会把 x=34 那条红虚线切过去。
-        ax.text(v.min() + 0.5, ymax * (0.67 if K == 2 else 0.56),
-                '最优 R=%d' % v.min(), fontsize=11.5, color=col,
+        # 「最优 R=29」的文本框横跨 x:[29.5, 36.1]，会把 x=33 那条红虚线切过去。
+        ax.text(vmin + 0.5, ymax * (0.67 if K == 2 else 0.56),
+                '最优 R=%d' % vmin, fontsize=11.5, color=col,
                 ha='left', va='center',
                 bbox=dict(facecolor='white', edgecolor='none', alpha=0.9, pad=1.5))
     ax.set_xlabel('资源规模 R = Σ$_g$ N$_{kg}^{req}$')
-    ax.set_ylabel('分区个数')
+    ax.set_ylabel('分区占比（%）')
     ax.set_title('全部分区的资源规模分布')
     ax.legend(fontsize=10.5, loc='upper right')
-    panel_tag(ax, '(c)')
+    panel_tag(ax, '(d)')
 
-    fig.tight_layout(w_pad=2.4)
+    fig.tight_layout(w_pad=2.4, h_pad=2.6)
+    # ---- (c) 的坐标边界：必须在**版面定稿后**按真实坐标区反推 ----
+    # 为什么不能写死、也不能在画之前定：本面板宽而扁，横向要放下四个簇，而簇名是
+    # 定宽的文字（点数不随数据单位走）。所以「一行能放几个字」与「x 轴跨多少数据单位」
+    # 是互相决定的，只能先量出坐标区真实尺寸，再解下面这个一元的边界条件：
+    #   要使半宽 half_pt 的簇名整块落在框内，需要 |cx| + half_pt/ppu ≤ S/2，
+    #   而 ppu = Wpt/S ⇒ S ≥ 2|cx| / (1 − 2·half_pt/Wpt)。
+    # 注意目标必须是 (c) 那个 axes：函数走到这里，`ax` 已经被 (d) 段改成 axes[1][1] 了。
+    axc = axes[1][0]
+    fig.canvas.draw()
+    _bb = axc.get_window_extent()
+    _Wpt = _bb.width * 72.0 / fig.dpi
+    _Hpt = _bb.height * 72.0 / fig.dpi
+
+    def _tw(txt, fs):
+        """粗略字宽（磅）：中日韩全角按字号，其余按半字号。只用来给边界留净空。"""
+        return sum(fs if ord(ch) > 0x2E80 else 0.5 * fs for ch in txt)
+
+    _half = [0.5 * _tw(t, 9.5) for t in _ttl]          # 各簇簇名的半宽（磅）
+    _ncl = len(comps)
+
+    def _edges(ppu):
+        """给定「每数据单位多少磅」，返回内容在 x 方向的左右边界（数据单位）。"""
+        lo = min(comp_cx[ci] - max(RING, _half[ci] / ppu) for ci in range(_ncl))
+        hi = max(comp_cx[ci] + max(RING, _half[ci] / ppu) for ci in range(_ncl))
+        return lo, hi
+
+    # 边界取在**内容**两侧而不是对称取 ±S/2：四簇里最左是 5 节点的圆环、最右是孤立的
+    # 单点，内容本身就不对称，对称取限会把整块内容推得偏左，右边空出一大片。
+    _S = 2.0 * max(abs(c) + RING for c in comp_cx) + 1.0
+    for _ in range(6):                                  # 不动点迭代，3 轮内已收敛到 0.1%
+        _ppu0 = _Wpt / _S
+        _lo0, _hi0 = _edges(_ppu0)
+        _S = (_hi0 - _lo0) + 12.0 / _ppu0               # 左右各留约 6 磅净空
+    _ppu = _Wpt / _S
+    _lo, _hi = _edges(_ppu)
+    axc.set_xlim(_lo - 6.0 / _ppu, _hi + 6.0 / _ppu)
+    # 纵向：上沿 = 簇名上沿（0.34 的间距 + 一行行高）；下沿 = 图内说明那一行。
+    _ys = [p[1] for p in posn.values()]
+    _line = 13.0 / _ppu
+    _ybot = min(_ys) - 0.40 - _line - 0.10
+    _ytop = max(_ys) + 0.34 + _line
+    _yc = (_ytop + _ybot) / 2.0
+    _need = _ytop - _ybot
+    # 圆环要在最终版面上**等比例**（否则是椭圆）。等比例需要的纵向跨度由坐标区真实宽高
+    # 比给出；若它比内容本身还窄（_need 更大），就退回 _need，宁可留白也不裁字。
+    _span = max(_S * _Hpt / _Wpt, _need)
+    axc.set_ylim(_yc - _span / 2.0, _yc + _span / 2.0)
+    # 「节点面积」与簇名的含义写在坐标区底部，不塞进标题——标题一长就会横向伸进相邻
+    # 面板（实测原标题 25 字宽 5.0 in，而单栏只有 3.3 in，直接压住 (d) 的标题）。
+    # 措辞必须是「把该簇单元连起来的站」而不是「该簇共用的站」：U01 另有 S06 专供其
+    # 自身运输架次，S06 不与任何别的单元共站、因而不产生边，也就不会出现在簇名里；
+    # 写「共用」会让人误读成「该簇只由这些站保障」。
+    axc.text(_lo + 6.0 / _ppu, _ybot + 0.10,
+             '节点面积 ∝ 工作量；簇上方为把该簇单元连起来的中继悬停站',
+             fontsize=9.0, color='#4A4A4A', va='bottom')
+    # 硬门禁：全部单元必须落在坐标区内。这条断言就是为「一半单元被裁掉」加的——图形
+    # 越界不会报错，只会安静地少画几个点，在缩略图上看不出来。
+    _xl, _yl = axc.get_xlim(), axc.get_ylim()
+    _out = [n for n, (x, y) in posn.items()
+            if not (_xl[0] + 0.10 <= x <= _xl[1] - 0.10
+                    and _yl[0] + 0.10 <= y <= _yl[1] - 0.10)]
+    assert not _out, '这些原子单元落在坐标区外会被裁掉：%s' % sorted(_out)
     save(fig, 'fig_q4_partition.png')
 
 
@@ -1053,7 +1165,9 @@ RES_CLASSES = [('uav:',  '运输无人机',   C_A),
 RES_COLOR = {p: c for p, _n, c in RES_CLASSES}
 
 
-def _resource_usage():
+def _resource_usage(trips_file='q3_transport_trips.csv',
+                    relay_file='q3_relay_trips.csv',
+                    split_charge=False):
     """从 results/*.csv 重建「资源 → 占用区间」，口径与 code/q2.py、code/q3.py 逐行一致。
 
     不重算模型：架次时刻、机型与电池/组件指派一律读 CSV。唯一借用的模型要素是
@@ -1063,8 +1177,8 @@ def _resource_usage():
     占用口径（右端一律取 CSV 的「返回O01时刻s」）：
       运输无人机  [t0, t1]                  q2.py: u['free_at']    = start + duration
       共享电池    [t0, t1 + 充电时长]        q2.py: bat['ready_at'] = 上式 + t_chg
-      中继无人机  [t0, t1 + turnover]        q3.py: r['free_at']    = t_start + t_tot + turnover
-      中继组件    [t0, t1 + 充电时长]        q3.py: c['ready_at']   = 上式 + charge_time(...)
+      中继无人机  [t0, t1 + turnover]        q3.py: u['free_at']  = 返航 + turnover（按出动）
+      中继组件    [t0, t1 + 充电时长]        q3.py: comps[...]    = 返航 + charge_time(...)
     运输架次读 q3_transport_trips.csv——那是**错峰后的最终方案**（F05 起由问题三
     直接把最终时刻落盘）。旧版读问题二的 q2_transport_trips.csv 再逐架次加上
     q3_stagger.csv 的推迟量，是同一件事的第二次拼装：两处口径一旦不同（例如
@@ -1075,8 +1189,18 @@ def _resource_usage():
     rt = load_relay_type()
     _n_rc, tf_r = load_relay_batteries()
 
-    trips = rd('q3_transport_trips.csv')
-    rel = rd('q3_relay_trips.csv')
+    trips = rd(trips_file)
+    rel = rd(relay_file)
+
+    # 电池占用区间的形状随 split_charge 变化：
+    #   False（默认）→ (t0, 释放时刻, 架次编号)，与 `fig_resource_conflict` 的
+    #                  重叠/间隙判据（比较 y[0] 与 x[1]）严格对齐；
+    #   True        → (t0, 返航时刻, 释放时刻, 架次编号)，供甘特图把「随机执行」
+    #                  与「返回后的两阶段充电」拆成两段画。
+    # 默认值不改动任何既有调用点，`fig_resource_conflict` 的重建结果逐位不变。
+    def _bat_iv(t0, t1, soc, cap, tid):
+        tr = t1 + charge_time(soc, cap)
+        return (t0, t1, tr, tid) if split_charge else (t0, tr, tid)
 
     use = {}
     for _, r in trips.iterrows():
@@ -1086,14 +1210,21 @@ def _resource_usage():
         soc = 1.0 - float(r['架次能耗kWh']) / tt[g]['E_use']
         use.setdefault(('uav:', r['无人机编号']), []).append((t0, t1, tid))
         use.setdefault(('bat:', r['电池编号']), []).append(
-            (t0, t1 + charge_time(soc, bats[g][1]), tid))
+            _bat_iv(t0, t1, soc, bats[g][1], tid))
+    # 中继侧先按 `出动编号` 去重（阶段 13 起一行 = 一次悬停站服务，同一次出动的
+    # 各行共享出动级的 `开始时刻s`/`返回O01时刻s`/`架次能耗kWh`）。机身与组件的
+    # 占用对象都是**出动**：不去重会把同一次出动写成若干段首尾相同的占用，图上
+    # 会显示成重叠、下面的 `assert n_ov == 0` 也会当场失败。旧表无该列时退回逐行，
+    # 那正好等价于一次出动只服务一站。
+    if '出动编号' in rel.columns:
+        rel = rel.drop_duplicates(subset=['出动编号'], keep='first')
     for _, r in rel.iterrows():
         t0, t1 = float(r['开始时刻s']), float(r['返回O01时刻s'])
         soc = 1.0 - float(r['架次能耗kWh']) / rt['E_use']
         use.setdefault(('RUAV:', r['中继无人机编号']), []).append(
             (t0, t1 + rt['turnover'], r['中继架次编号']))
         use.setdefault(('RBAT:', r['能源组件编号']), []).append(
-            (t0, t1 + charge_time(soc, tf_r), r['中继架次编号']))
+            _bat_iv(t0, t1, soc, tf_r, r['中继架次编号']))
     return {k: sorted(v) for k, v in use.items()}
 
 
@@ -1353,7 +1484,618 @@ def fig_solution_network():
     save(fig, 'fig_solution_network.png')
 
 
+def fig_sens_panel():
+    """§9.3 的多参数灵敏度与稳健性组合图（2×2）。
+
+    四格依次对应四组扰动：(a) 问题二 5 种子稳定性（S4-a，`q2_seeds.csv`）、
+    (b) 中继无人机架数（S4-b(i)）、(c) 合并窗口与审计步长（S4-b(ii)(iii)，
+    两组都是「改了也几乎不动」的项，故合并成一格直接画出「平」）、
+    (d) 库存阈值曲线（S4-c，`q4_sens.csv`）。
+
+    **图里不写死任何数字**：基线取 `q3_coverage.csv` 的「联合优化」行，档位数与
+    分区数取 `q4_comparison.csv`，散点与曲线一律来自各自的 `*_sens.csv`。
+    这样做是因为本节的全部论点是「换个参数会变多少」，一旦图上的数字与表脱钩，
+    图就会替表说话。
+    """
+    fig, axes = plt.subplots(2, 2, figsize=(10.4, 8.2))
+
+    # ---- (a) 问题二：4 个架次档 × 5 个种子的完工时刻 ----
+    ax = axes[0, 0]
+    sd = rd('q2_seeds.csv')
+    KS = (20, 22, 25, 30)
+    data = [sd[sd['K上限'] == K]['makespan_s'].values.astype(float) for K in KS]
+    bp = ax.boxplot(data, positions=range(len(KS)), widths=0.5, patch_artist=True,
+                    showfliers=False, medianprops=dict(color='black', lw=1.4))
+    for b in bp['boxes']:
+        b.set(facecolor='#DCE6F1', edgecolor=C_A, lw=1.1)
+    # 逐种子散点用固定偏移错开，不用随机抖动——图必须每次运行逐位相同
+    off = np.linspace(-0.17, 0.17, 5)
+    for i, K in enumerate(KS):
+        ax.plot(i + off, data[i], 'o', ms=5.5, color=C_A, alpha=0.9, zorder=3)
+    # 交付档（K≤25）的档案值是 5 个种子里的最优，不是中位数，故单标红星
+    scan = rd('q2_scan.csv')
+    hit = scan[scan['K上限'] == 25]
+    if len(hit) == 1:
+        ax.plot([2], [float(hit['档案makespan_s'].iloc[0])], marker='*', ms=17,
+                color=C_C, zorder=4, label='交付档取该档 5 种子的最优')
+    ax.set_xticks(range(len(KS)))
+    ax.set_xticklabels(['$K\\leq20$', '$K\\leq22$', '$K\\leq25$', '$K\\leq30$'])
+    ax.set_xlabel('架次数约束档')
+    ax.set_ylabel('完工时刻 / s')
+    ax.set_title('多种子稳定性')
+    ax.legend(loc='upper right', fontsize=10)
+    n30 = sd[sd['K上限'] == 30][['架次', '能耗kWh', 'makespan_s', '加权时延']]
+    # 注释框放左上偏中：左下被 K≤25 的箱与红星占着，右上被图例占着，
+    # 只有 (0.02, 0.52) 一带是空的。
+    ax.text(0.02, 0.52, '$K\\leq30$ 档：\n$%d/5$ 个种子四项指标逐位相同'
+            % int(n30.value_counts().iloc[0]),
+            transform=ax.transAxes, fontsize=10.5, va='center',
+            bbox=dict(fc='white', ec='0.7', alpha=0.85, boxstyle='round,pad=0.3'))
+    panel_tag(ax, '(a)')
+
+    # ---- (b) 问题三：中继无人机的架数是不是紧的 ----
+    ax = axes[0, 1]
+    s3 = rd('q3_sens.csv')
+    grp = s3[(s3['扰动组'] == '中继机数') & (s3['指标'] == '超额站·秒')]
+    xs, ex = [], []
+    for n in (1, 2, 3):
+        xs.append(n)
+        ex.append(float(grp[grp['取值'] == 'n_relay=%d' % n]['数值'].iloc[0]))
+    ax.bar(range(len(xs)), ex, width=0.55, color=[C_C, C_B, C_B],
+           edgecolor='0.3', lw=0.8)
+    top = max(ex) if max(ex) > 0 else 1.0
+    for i, v in enumerate(ex):
+        ax.text(i, v + top * 0.035, '%.1f' % v, ha='center', fontsize=11.5)
+    ax.set_xticks(range(len(xs)))
+    ax.set_xticklabels(['$n_r=1$', '$n_r=2$（库存）', '$n_r=3$'])
+    ax.set_xlabel('中继无人机可用架数')
+    ax.set_ylabel('超额站$\\cdot$秒 / (站$\\cdot$s)')
+    ax.set_ylim(0, top * 1.24)
+    ax.set_title('中继机数的紧度')
+    peak = float(s3[(s3['扰动组'] == '中继机数')
+                    & (s3['指标'] == '同时最少站数峰值')]['数值'].iloc[0])
+    ax.text(0.40, 0.74, '交付排班同一时刻\n最少需要 $%d$ 个悬停站' % int(peak),
+            transform=ax.transAxes, fontsize=10.5,
+            bbox=dict(fc='white', ec='0.7', alpha=0.85, boxstyle='round,pad=0.3'))
+    panel_tag(ax, '(b)')
+
+    # ---- (c) 合并窗口与审计步长：两组都该「平」，故并成一格画 ----
+    ax = axes[1, 0]
+    cov = rd('q3_coverage.csv')
+    base = float(cov[cov['口径'] == '联合优化']['直连时间占比'].iloc[0])
+    MW = ['gap=600, max_job=2400', 'gap=900, max_job=3600（交付档）',
+          'gap=1200, max_job=4800']
+    DTS = ['Δt=0.5 s', 'Δt=1 s', 'Δt=2 s']
+
+    def pick(group, setting, metric='直连时间占比'):
+        h = s3[(s3['扰动组'] == group) & (s3['取值'] == setting) & (s3['指标'] == metric)]
+        return float(h['数值'].iloc[0])
+
+    xs3 = [0, 1, 2]
+    ax.plot(xs3, [pick('合并窗口', t) for t in MW], 'o-', color=C_A, lw=1.6,
+            ms=7, label='服务时段合并窗口')
+    ax.plot(xs3, [pick('审计步长', t) for t in DTS], 's--', color=C_C, lw=1.6,
+            ms=6.5, label='逐时刻审计步长')
+    ax.axhline(base, color='black', ls=':', lw=1.3)
+    span = max(abs(pick('合并窗口', t) - base) for t in MW)
+    span = max(span, max(abs(pick('审计步长', t) - base) for t in DTS))
+    lo, hi = base - 2.6 * span, base + 1.2 * span
+    ax.set_ylim(lo, hi)
+    # 交付基线的名字直接写在虚线上，不占图例——三行图例会把右下角撑到审计步长的
+    # 「宽档」点上去（那一段的纵坐标正好落在图例框里）。
+    ax.text(0.99, (base - lo) / (hi - lo) + 0.025, '交付基线', transform=ax.transAxes,
+            ha='right', va='bottom', fontsize=10.5, color='0.25')
+    ax.set_xticks(xs3)
+    ax.set_xticklabels(['窄档', '交付档', '宽档'])
+    ax.set_xlabel('参数档位（每组三档，中档为交付取值）')
+    ax.set_ylabel('直连时间占比')
+    ax.set_title('窗口与步长的不敏感性')
+    ax.legend(loc='lower right', fontsize=10)
+    rg_mw = max(pick('合并窗口', t) for t in MW) - min(pick('合并窗口', t) for t in MW)
+    rg_dt = max(pick('审计步长', t) for t in DTS) - min(pick('审计步长', t) for t in DTS)
+    # 极差恰为 0 时不能印成「0.0×10⁻⁶」——那是「算出来很小」，而事实是逐位相同，
+    # 措辞要跟着事实走。
+    mw_txt = '恒为 $0$' if rg_mw == 0 else '$%.1f\\times10^{-6}$' % (rg_mw * 1e6)
+    ax.text(0.03, 0.06, '组内极差：合并窗口 %s\n审计步长 $%.1f\\times10^{-4}$'
+            % (mw_txt, rg_dt * 1e4),
+            transform=ax.transAxes, fontsize=10.5,
+            bbox=dict(fc='white', ec='0.7', alpha=0.85, boxstyle='round,pad=0.3'))
+    panel_tag(ax, '(c)')
+
+    # ---- (d) 问题四：逐类各加 m 件后还剩多少个分区可选 ----
+    ax = axes[1, 1]
+    s4 = rd('q4_sens.csv')
+    thr = s4[(s4['扰动组'] == '库存阈值·逐类各加m件') & (s4['指标'] == '库存可行分区数')]
+    cmp4 = rd('q4_comparison.csv')
+    npart = {int(r['K']): int(r['分区数']) for _, r in cmp4.iterrows()}
+    for K, c, mk in ((2, C_A, 'o'), (3, C_C, 's')):
+        rows = []
+        for _, r in thr[thr['取值'].str.startswith('K=%d,' % K)].iterrows():
+            rows.append((int(str(r['取值']).split('m=')[1]), float(r['数值'])))
+        rows.sort()
+        ax.plot([0] + [m for m, _ in rows], [0.0] + [v for _, v in rows],
+                mk + '-', color=c, lw=1.6, ms=6.5,
+                label='$K=%d$（共 $%d$ 个分区）' % (K, npart[K]))
+    # 可行分区数可以取 0，普通对数轴画不出 0，故用 symlog：0 附近线性、以上取对数。
+    ax.set_yscale('symlog', linthresh=1, linscale=0.5)
+    ax.set_xlabel('现库存逐类各加 $m$ 件')
+    ax.set_ylabel('库存可行的分区数')
+    ax.set_title('库存阈值曲线')
+    ax.set_xticks(range(0, 6))
+    ax.legend(loc='lower right', fontsize=10)
+    # 注释放左上：$m\\ge2$ 之后两条曲线都升到右上，左上才是空的。
+    ax.text(0.03, 0.86, '$m=0$（现库存）时\n两个 $K$ 都是 $0$ 个可行分区',
+            transform=ax.transAxes, fontsize=10.5, va='top',
+            bbox=dict(fc='white', ec='0.7', alpha=0.85, boxstyle='round,pad=0.3'))
+    panel_tag(ax, '(d)')
+
+    fig.tight_layout(h_pad=3.0, w_pad=2.4)
+    save(fig, 'fig_sens.png')
+
+
+# ------------------------------------------- 问题三：优化前后对照与最小裕量
+
+def _seg_spans(pts, states):
+    """把逐采样点状态归并成 [(t1, t2, 状态), …]，边界口径与 q3.audit 的 b 序列相同。
+
+    内部边界取相邻采样时刻的中点、首尾取端点。这样每段的长度恰是审计里那一段的
+    时间权重，条形长度可以直接当占比读；若改用 pts[j-1][0] 收尾、下一段从 pts[j][0]
+    起，每处边界都会漏掉一个采样步长，画出来的中断占比会比报出的数字小一截。
+    """
+    ts = [p[0] for p in pts]
+    n = len(ts)
+    b = [ts[0]] + [(ts[k - 1] + ts[k]) / 2.0 for k in range(1, n)] + [ts[-1]]
+    out = []
+    i = 0
+    while i < n:
+        j = i
+        while j < n and states[j] == states[i]:
+            j += 1
+        out.append((b[i], b[j], states[i]))
+        i = j
+    return out
+
+
+def fig_q3_plan_compare():
+    """优化前后的运输—中继甘特对照（三行共享时间轴）。
+
+    (a) 问题二基线的 24 个运输架次，按 `原开始时刻s`（取落盘的 base_start 全精度值）
+    画，逐采样点用 q3.direct_ok 只读重算，蓝=直连、红=中断；(b) 问题三最终方案，
+    通信分段直接读 q3_comm_phases.csv；(c) 两架中继机的悬停服务段。三行同一时间轴，
+    「架次整体后移了多少」与「后移换来了什么」才能直接对着看。
+
+    **内建门禁**：把中继整个拿掉后重算的直连／中断时间占比，必须与
+    q3_coverage.csv 的「无中继」行逐位相符（6 位小数）。这张图的说服力全部建立在
+    「同一套轨迹、同一个判据，去掉中继就是 28.3% 的中断」之上；重算一旦与结果表
+    不符，说明图与解已经各说一套，此时宁可让脚本失败，也不留下一张自说自话的图。
+    """
+    d, q3, assign = _q3_context()
+    cov = rd('q3_coverage.csv').set_index('口径')
+    ph = rd('q3_comm_phases.csv')
+    rt = rd('q3_relay_trips.csv')
+    tt = rd('q3_transport_trips.csv')
+
+    # 基线时刻与 CSV 交叉核对：CSV 的「原开始时刻s」只留 3 位小数，容差按舍入量级取
+    csv_old = {r['架次编号']: float(r['原开始时刻s']) for _, r in tt.iterrows()}
+    for a in assign:
+        assert a['tid'] in csv_old, '架次 %s 不在 q3_transport_trips.csv 里' % a['tid']
+        assert abs(a['base_start'] - csv_old[a['tid']]) <= 1e-3 + 1e-9, \
+            '架次 %s 的基线时刻 json=%.6f 与 csv=%.3f 不符' % (
+                a['tid'], a['base_start'], csv_old[a['tid']])
+
+    segs_old, tot, T = {}, dict(direct=0.0, gap=0.0), 0.0
+    for a in assign:
+        t = d.transport_types[a['type']]
+        pts = q3.sample_trip_trajectory(d, t, a['route'], a['boxes_at'],
+                                        t0=a['base_start'], dt=q3.DT_AUDIT)
+        w = q3.time_weights(pts)
+        states = ['直连' if q3.direct_ok(d, lon, lat, alt) else '中断'
+                  for _tt, lon, lat, alt in pts]
+        for k, s in enumerate(states):
+            tot['direct' if s == '直连' else 'gap'] += w[k]
+        T += pts[-1][0] - pts[0][0]
+        segs_old[a['tid']] = _seg_spans(pts, states)
+    rec = {k: tot[k] / T for k in tot}
+    for key, col in (('direct', '直连时间占比'), ('gap', '中断时间占比')):
+        ref = float(cov.loc['无中继', col])
+        assert abs(rec[key] - ref) < 5e-7, \
+            '（a）行重算的%s = %.6f，与 q3_coverage.csv「无中继」行的 %.6f 不符' % (
+                col, rec[key], ref)
+    fr = float(cov.loc['联合优化', '中继时间占比'])
+    print('[自校验] 优化前（无中继）重算：直连 %.6f / 中断 %.6f —— 与 q3_coverage.csv '
+          '「无中继」行逐位相符' % (rec['direct'], rec['gap']))
+
+    trips = sorted(csv_old)
+    ypos = {x: i for i, x in enumerate(trips)}
+    cmap = {'直连': C_DIRECT, '中继': C_RELAY, '中断': C_OUT}
+    # 24 行 × 2 格，每格要给到 ~3.7 in 才有 0.15 in 行距，故整图取到 9.4 in 高；
+    # hspace 由 0.15 加到 0.32，是因为上一格的 lower-left 图例与下一格的居中标题
+    # 在 0.15 时会挤在同一条水平带上（192 dpi 截图实测两行字重叠）。
+    fig, axes = plt.subplots(3, 1, figsize=(10.6, 9.4), sharex=True,
+                             gridspec_kw=dict(height_ratios=[1.0, 1.0, 0.30],
+                                              hspace=0.32))
+
+    # (a) 优化前：问题二基线时刻，只判直连
+    ax = axes[0]
+    for tid in trips:
+        for t1, t2, s in segs_old[tid]:
+            ax.barh(ypos[tid], t2 - t1, left=t1, height=0.7,
+                    color=cmap[s], edgecolor='none', zorder=3)
+    ax.set_yticks(list(ypos.values())); ax.set_yticklabels(trips, fontsize=9)
+    ax.invert_yaxis()
+    ax.set_ylabel('运输架次')
+    ax.set_title('优化前：问题二基线时刻，无中继保障')
+    # 图例一律摆 lower left：末几个架次（T19~T24）从 2500 s 之后才起飞，左下角才是
+    # 空格；放 lower right 会正好压在它们的条形上（截图逐行确认）。
+    ax.legend(handles=[Patch(color=C_DIRECT, label='直连可用'),
+                       Patch(color=C_OUT, label='无直连（此处即为中断）')],
+              loc='lower left', ncol=1, fontsize=10.5)
+    ax.text(0.985, 0.90, '直连 %.1f%%，中断 %.1f%%' % (rec['direct'] * 100, rec['gap'] * 100),
+            ha='right', va='center', transform=ax.transAxes, fontsize=13,
+            color=C_OUT, fontweight='bold')
+    panel_tag(ax, '(a)')
+
+    # (b) 优化后：问题三最终时刻，直连/中继/中断三段由审计结果直接给出
+    ax = axes[1]
+    for _, r in ph.iterrows():
+        if r['运输架次编号'] not in ypos:
+            continue
+        ax.barh(ypos[r['运输架次编号']], r['结束时刻s'] - r['开始时刻s'],
+                left=r['开始时刻s'], height=0.7, color=cmap[r['保障方式']],
+                edgecolor='none', zorder=3)
+    ax.set_yticks(list(ypos.values())); ax.set_yticklabels(trips, fontsize=9)
+    ax.invert_yaxis()
+    ax.set_ylabel('运输架次')
+    ax.set_title('优化后：问题三联合调度时刻，中继补齐全部缺口')
+    cnt = ph['保障方式'].value_counts()
+    ax.legend(handles=[Patch(color=cmap[k], label='%s（%d 段）' % (k, cnt.get(k, 0)))
+                       for k in ['直连', '中继', '中断']],
+              loc='lower left', ncol=1, fontsize=10.5)
+    ax.text(0.985, 0.90, '中断 %d 段，中继保障 %.1f%%'
+            % (int(cnt.get('中断', 0)), fr * 100),
+            ha='right', va='center', transform=ax.transAxes, fontsize=13,
+            color=C_RELAY, fontweight='bold')
+    panel_tag(ax, '(b)')
+
+    # (c) 中继机出动：与上面两行共用时间轴，才能看出中继窗口正好扣住失效区间
+    ax = axes[2]
+    ruavs = sorted(rt['中继无人机编号'].unique())
+    ry = {u: i for i, u in enumerate(ruavs)}
+    for _, g in rt.groupby('出动编号', sort=False):
+        u = g['中继无人机编号'].iloc[0]
+        t0, t1 = float(g['开始时刻s'].min()), float(g['返回O01时刻s'].iloc[0])
+        se = float(g['服务结束时刻s'].max())
+        ax.barh(ry[u], se - t0, left=t0, height=0.5, color=C_RELAY,
+                edgecolor='black', lw=0.5, zorder=3)
+        ax.barh(ry[u], t1 - se, left=se, height=0.5, color=C_RELAY, alpha=0.35,
+                edgecolor='black', lw=0.5, zorder=3)
+        # 标签写在条形**之上**并加白底：架次标签是黑字，直接压在深绿的悬停服务段上
+        # 会糊成一团（192 dpi 截图实测不可读）；白底后压在任何底色上都清楚。
+        ax.text(t0, ry[u] + 0.34, '%s@%s' % (g['中继架次编号'].iloc[0],
+                                             '→'.join(str(s) for s in g['悬停站编号'])),
+                fontsize=8.5, va='bottom', zorder=6,
+                bbox=dict(fc='white', ec='none', alpha=0.85, pad=0.8))
+    ax.set_yticks(list(ry.values())); ax.set_yticklabels(ruavs)
+    # 下界留到 2.45（原 1.65）：两架中继各占一行，1.65 时图例的上沿正好切在 R02
+    # 条形的下缘上（截图确认），再往下让出 1.2 个单位，图例整块落在空白里。
+    ax.set_ylim(2.45, -0.95)
+    ax.set_xlabel('时间 (s)'); ax.set_ylabel('中继无人机')
+    ax.set_title('中继机出动')
+    ax.legend(handles=[Patch(facecolor=C_RELAY, edgecolor='black', label='悬停服务'),
+                       Patch(facecolor=C_RELAY, alpha=0.35, edgecolor='black',
+                             label='返航与周转')],
+              loc='lower right', ncol=2, fontsize=10.5)
+    panel_tag(ax, '(c)')
+
+    save(fig, 'fig_q3_plan_compare.png')
+
+
+def fig_q3_margin():
+    """三类最小裕量：硬时限、直连、中继接入（1×3）。
+
+    (a) 31 个带硬时限货箱的交付余量（q3_box_delivery.csv）；(b) 24 个运输架次在全
+    轨迹上的最小直连裕量；(c) 19 个通信失效区间的最小接入裕量。(b)(c) 一律
+    **读** q3_sens.csv 里 make_q3_sens.py 落下的逐对象明细行，本函数只画不算——
+    同一批数字若在这里再调一次 direct_margin/access_margin，就有了两条算路，
+    正文引用的宏与本图会各自独立地漂移。图末另把图中的极值与本表的合计行逐位
+    核对，两边一旦分叉就当场报错。
+
+    (c) 是这张图存在的理由：失效区间里运输机完全没有直连，全靠悬停站接住，
+    接入裕量必须全部大于等于 0（q3.MARGIN_DB）。若有一段为负，说明覆盖矩阵与
+    实际轨迹不一致——那属于求解器的错，必须在图上暴露出来，而不是抹掉。
+    """
+    s3 = rd('q3_sens.csv')
+    bd = rd('q3_box_delivery.csv')
+
+    def _detail(group, metric):
+        sub = s3[s3['扰动组'] == group]
+        if sub.empty:
+            raise SystemExit('q3_sens.csv 缺 %s 组——先跑 code/make_q3_sens.py' % group)
+        got = sub[sub['指标'] == metric]
+        if len(got) != len(sub):
+            raise SystemExit('%s 组的指标不全是 %s，无法逐对象取数' % (group, metric))
+        return {str(r['取值']): float(r['数值']) for _, r in got.iterrows()}
+
+    def _total(setting, metric):
+        """取合计行（与正文宏同一个格子），用来核对图中极值。"""
+        got = s3[(s3['扰动组'] == '交付解·最小裕量') & (s3['取值'] == setting)
+                 & (s3['指标'] == metric)]
+        if len(got) != 1:
+            raise SystemExit('q3_sens.csv 的 交付解·最小裕量/%s/%s 命中 %d 行，应为 1 行'
+                             % (setting, metric, len(got)))
+        return float(got.iloc[0]['数值'])
+
+    min_direct = _detail('交付解·最小裕量·逐架次', '最小直连裕量')
+    min_access = _detail('交付解·最小裕量·逐区间', '最小接入裕量')
+    n_neg = sum(1 for v in min_access.values() if v < -1e-6)
+    print('[自校验] %d 个失效区间的最小接入裕量：最小 %+.4f dB，为负的 %d 个'
+          % (len(min_access), min(min_access.values()), n_neg))
+    assert n_neg == 0, '有 %d 个失效区间的接入裕量为负，覆盖矩阵与实际轨迹不一致' % n_neg
+
+    fig = plt.figure(figsize=(10.8, 4.4))
+    gs = fig.add_gridspec(1, 3, width_ratios=[1.30, 1.0, 1.0], wspace=0.42)
+
+    # (a) 硬时限余量：3 个数量级，故用对数横轴；「余量 > 0」这条判据用红字写在标题区
+    ax = fig.add_subplot(gs[0, 0])
+    hv = bd.dropna(subset=['硬时限余量s']).sort_values('硬时限余量s')
+    ys = np.arange(len(hv))
+    ax.barh(ys, hv['硬时限余量s'].values, height=0.72,
+            color=[C_C if i == 0 else C_A for i in range(len(hv))])
+    ax.set_yticks(ys)
+    ax.set_yticklabels([str(c) for c in hv['货箱编号']], fontsize=6.6)
+    # 下界留出 2 个单位，专给最紧箱的数值标注——31 行里最上 12 行的条形都止于
+    # 2000 s 之前，但它们上方没有连续空白，格内任何位置都会压住某一行。
+    ax.set_ylim(len(hv) + 2.0, -0.6)
+    # linthresh 取 1 s：最紧的那个箱子只有 5.353 s，若阈值取 10 它会贴到 0 上看不见
+    ax.set_xscale('symlog', linthresh=1.0)
+    ax.set_xticks([0, 1, 10, 100, 1000, 10000])
+    ax.set_xticklabels(['0', '1', '10', '100', '1000', '10000'])
+    ax.axvline(0.0, color=C_C, ls='--', lw=1.6)
+    ax.set_xlabel('交付余量（s）')
+    ax.set_title('硬时限余量（%d 箱）' % len(hv))
+    r0 = hv.iloc[0]
+    ax.text(0.98, 0.012, '最紧 %s：%.3f s' % (r0['货箱编号'], r0['硬时限余量s']),
+            transform=ax.transAxes, ha='right', va='bottom', fontsize=10, color=C_C,
+            fontweight='bold')
+    panel_tag(ax, '(a)')
+
+    # (b) 最小直连裕量：全负说明这些架次的某一段确实没有直连，这正是中继存在的理由
+    ax = fig.add_subplot(gs[0, 1])
+    md = sorted(min_direct.items(), key=lambda kv: kv[1])
+    ax.barh(np.arange(len(md)), [v for _k, v in md], height=0.72, color=C_A)
+    ax.set_yticks(np.arange(len(md)))
+    ax.set_yticklabels([k for k, _v in md], fontsize=8)
+    # 底部同样留出 3 个单位的空白带专给标注：T01/T02/T07/T03/T10 这五根条形是
+    # 正的（向右延伸），格内任何位置放文字都会压住它们，只有条形下方的空带是干净的。
+    ax.set_ylim(len(md) + 3.0, -0.6)
+    ax.axvline(0.0, color=C_C, ls='--', lw=1.6)
+    ax.set_xlabel('最小直连裕量（dB）')
+    ax.set_title('架次的最小直连裕量')
+    n_ok = sum(1 for _k, v in md if v >= 0)
+    # 措辞按**采样点上的最小值**写，不写「全程直连」：判据是 Δt = 1 s 的逐点采样，
+    # 说「全程」就把一个采样结论说成了连续时间上的全称结论。
+    ax.text(0.97, 0.012, '%d/%d 架次的最小直连裕量 $\\geq 0$；\n其余 %d 架次需中继'
+            % (n_ok, len(md), len(md) - n_ok), transform=ax.transAxes, ha='right',
+            fontsize=9.5, va='bottom',
+            bbox=dict(fc='white', ec='0.7', alpha=0.9, boxstyle='round,pad=0.3'))
+    panel_tag(ax, '(b)')
+
+    # (c) 失效区间的接入裕量：全部 ≥ 0 才说明「零中断」不是把负裕量抹掉换来的
+    ax = fig.add_subplot(gs[0, 2])
+    ma = sorted(min_access.items(), key=lambda kv: kv[1])
+    ax.barh(np.arange(len(ma)), [v for _g, v in ma], height=0.72, color=C_RELAY)
+    ax.set_yticks(np.arange(len(ma)))
+    ax.set_yticklabels([g for g, _v in ma], fontsize=8)
+    ax.set_ylim(len(ma) - 0.4, -0.6)
+    ax.axvline(0.0, color=C_C, ls='--', lw=1.6)
+    ax.set_xlabel('最小接入裕量（dB）')
+    ax.set_title('失效区间的中继接入裕量')
+    # 注释放**右上**：前六个区间（G11/G01/G08/G02/G09/G04）的裕量都不到 5 dB，
+    # 右上角对它们而言是空的；放右下会正好压住 G15/G18 那两根最长的条形。
+    # 小数位与正文宏同为 4 位：图上写 +0.42、正文写 +0.4228 会让读者以为两处
+    # 说的是两件事，而它们本是同一个数。
+    ax.text(0.97, 0.93, '%d 个区间全部 $\\geq 0$\n最小 %+.4f dB'
+            % (len(ma), min(v for _g, v in ma)), transform=ax.transAxes, ha='right',
+            va='top', fontsize=9.5, bbox=dict(fc='white', ec='0.7', alpha=0.9,
+                                            boxstyle='round,pad=0.3'))
+    panel_tag(ax, '(c)')
+
+    # 图与正文同源的最后一道闸：图里画出来的极值必须与正文宏取的那两个合计格子
+    # 逐位相同。两条算路一旦分叉，这里当场报错，而不是让论文与自己的图各说一套。
+    chk = [('最小直连裕量', min(v for _k, v in md), '全部架次取最小'),
+           ('最小接入裕量', min(v for _g, v in ma), '全部失效区间取最小')]
+    for metric, shown, setting in chk:
+        tot = _total(setting, metric)
+        if abs(shown - tot) > 1e-12:
+            raise SystemExit('图 %s 的极值 %r 与 q3_sens.csv 合计行 %r 不符'
+                             % (metric, shown, tot))
+    print('[自校验] 图中的两个极值与 q3_sens.csv 合计行逐位一致')
+
+    save(fig, 'fig_q3_margin.png')
+
+
+def fig_q3_resource_gantt():
+    """运输机与共享电池的占用甘特（含等待段与充电段）。
+
+    (a) 8 架运输无人机的占用条：实心为该机在执行架次，浅色底为本机空闲等待；
+    (b) 14 组共享电池：实心为随机执行架次，斜纹为返航后的两阶段充电。
+    两条红色竖线是货箱硬时限（从 q3_box_delivery.csv 按数据取去重值），不写字面量
+    ——硬时限是题目给的数，图上写错了不会有任何报错提醒。
+
+    复用 `_resource_usage(split_charge=True)`：占用口径与 §9 表 9.2 的复核完全同一份
+    代码路径，不另写一套反算，避免图与表各说一套。
+    """
+    use = _resource_usage(split_charge=True)
+    keys = _ordered_keys(use)
+    uavs = [k for k in keys if k[0] == 'uav:']
+    bats = [k for k in keys if k[0] == 'bat:']
+    # 释放时刻：电池是 4 元组 (t0, 返航, 释放, 编号)，机身是 3 元组 (t0, 返航, 编号)
+    _rel = lambda iv: iv[2] if len(iv) == 4 else iv[1]
+    tmax = max(_rel(iv) for k in keys for iv in use[k])
+    dl = sorted(set(rd('q3_box_delivery.csv')['硬时限时刻s'].dropna().astype(float)))
+    # 横轴上界取「最后释放时刻」与「最晚硬时限」的较大者：现方案的资源占用在 9200 s
+    # 前后就结束了，而最晚的硬时限是 10800 s —— 若按前者截断，第三条硬时限线会落在
+    # 图外，读者只看到两条线、以为硬时限只有两档。右边留出的空白本身也是信息：
+    # 全部资源在最后一条硬时限之前就已释放完毕。
+    xmax = max(tmax, max(dl)) * 1.005
+
+    fig, axes = plt.subplots(2, 1, figsize=(10.4, 7.2), sharex=True,
+                             gridspec_kw=dict(height_ratios=[len(uavs), len(bats)],
+                                              hspace=0.16))
+
+    # (a) 运输无人机：浅色底条铺满全场，实心条压在上面，露出的部分就是等待
+    ax = axes[0]
+    for i, k in enumerate(uavs):
+        ax.barh(i, xmax, left=0.0, height=0.72, color='#D9D9D9', zorder=1)
+        for iv in use[k]:
+            ax.barh(i, iv[1] - iv[0], left=iv[0], height=0.72, color=C_A,
+                    edgecolor='black', lw=0.4, zorder=3)
+    ax.set_yticks(range(len(uavs)))
+    ax.set_yticklabels([k[1] for k in uavs])
+    ax.set_ylim(len(uavs) - 0.4, -0.6)
+    busy = {k: sum(iv[1] - iv[0] for iv in use[k]) for k in uavs}
+    # 利用率的分母用**机队完工时刻**（最后一架次返航）× 架数，而不是上面为画满
+    # 硬时限线而撑宽的横轴上界——拿坐标轴范围当工期，等于把排版决定写成了指标。
+    t_done = max(iv[1] for k in uavs for iv in use[k])
+    util = 100.0 * sum(busy.values()) / (t_done * len(uavs))
+    ax.set_ylabel('运输无人机')
+    ax.set_title('运输无人机占用与等待')
+    ax.text(0.985, 0.05, '机队利用率 %.0f%%（占用 %.0f s / 可用 %.0f s）'
+            % (util, sum(busy.values()), t_done * len(uavs)),
+            transform=ax.transAxes, ha='right', va='bottom', fontsize=10.5,
+            bbox=dict(fc='white', ec='0.7', alpha=0.9, boxstyle='round,pad=0.3'))
+    panel_tag(ax, '(a)')
+
+    # (b) 共享电池：充电段用斜纹，与实心任务段在形状上就分得开（不只靠颜色）
+    ax = axes[1]
+    for i, k in enumerate(bats):
+        for t0, t1, tr, _lab in use[k]:
+            ax.barh(i, t1 - t0, left=t0, height=0.72, color=C_B,
+                    edgecolor='black', lw=0.4, zorder=3)
+            ax.barh(i, tr - t1, left=t1, height=0.72, facecolor='white',
+                    edgecolor=C_B, lw=0.8, hatch='///', zorder=3)
+    ax.set_yticks(range(len(bats)))
+    ax.set_yticklabels([k[1] for k in bats], fontsize=9)
+    ax.set_ylim(len(bats) - 0.4, -0.6)
+    ax.set_xlabel('时间（s）')
+    ax.set_ylabel('共享电池')
+    ax.set_title('共享电池占用与两阶段充电')
+    ax.legend(handles=[Patch(facecolor=C_B, edgecolor='black', label='随机执行架次'),
+                       Patch(facecolor='white', edgecolor=C_B, hatch='///',
+                             label='返航后充电')],
+              loc='lower right', bbox_to_anchor=(1.0, 1.005), ncol=2, fontsize=10.5,
+              frameon=False)
+    panel_tag(ax, '(b)')
+
+    # 硬时限线画在两格上：横轴共享，同一条线在两格里必须落在同一位置
+    for ax in axes:
+        for dlt in dl:
+            ax.axvline(dlt, color=C_C, ls='--', lw=1.6, zorder=5)
+        ax.set_xlim(0, xmax)
+    # 两个图例都摆到坐标区**上外方**（锚在 (1.0, 1.005)、左对齐朝右展开）：格内右上方
+    # 看着是空的，其实每一行都铺着「空闲等待」的灰底条，图例压上去就把等待段盖住了；
+    # 标题居中、图例靠右，两者在 10.4 in 宽里相隔 3 in 以上，互不干涉。
+    axes[0].legend(handles=[Patch(facecolor=C_A, edgecolor='black', label='执行架次'),
+                            Patch(facecolor='#D9D9D9', label='空闲等待'),
+                            Line2D([], [], color=C_C, ls='--', lw=1.6, label='货箱硬时限')],
+                   loc='lower right', bbox_to_anchor=(1.0, 1.005), ncol=3, fontsize=10.5,
+                   frameon=False)
+
+    fig.tight_layout()
+    save(fig, 'fig_q3_resource_gantt.png')
+
+
+# ------------------------------------- 问题四：资源规模—均衡性前沿
+
+def fig_q4_frontier():
+    """88 573 个分区在（资源规模 R, 工作量均衡 CV_W）平面上的位置。
+
+    (a) 每个分区一个点，另按 R 画出各 K 下「该资源规模里最均衡的那个分区」的阶梯
+    前沿，并用星标标出两个推荐分区（R 与 CV 都从 q4_comparison.csv 读）；
+    (b) CV_W 的经验分布，用来回答「推荐解的均衡度到底算好还是差」。
+
+    散点用的是全部 88 573 行，不是抽样——抽样会让「前沿之下还有多少解」这个问题
+    无法回答，而本图的全部意义就在于「前沿与云体的距离」。
+    """
+    allp = rd('q4_all_partitions.csv')
+    cmp = rd('q4_comparison.csv').set_index('K')
+    feas = int(cmp.loc[2, '库存可行分区数']) + int(cmp.loc[3, '库存可行分区数'])
+    assert feas == 0, '库存可行分区数不再是 0（现为 %d），本图注释须重写' % feas
+    # (b) 注解的方向依赖一个前提：推荐解的 R 是**全部同 K 分区里的最小值**（因为
+    # 第一层目标就是最小化 R），故其均衡度必然落在 CV 分布的最差一端。若哪天换成
+    # 先求均衡，那句话会整句反向却不会报错——故在此把前提钉住。
+    for _K in (2, 3):
+        _r_min = float(allp[allp['K'] == _K]['资源规模R'].min())
+        if float(cmp.loc[_K, '资源规模R']) != _r_min:
+            raise SystemExit('K=%d 的推荐资源规模 %g 不是全部分区的最小值 %g，'
+                             '「先最小化 R」这一前提不成立，(b) 的注解须改写'
+                             % (_K, float(cmp.loc[_K, '资源规模R']), _r_min))
+
+    fig, axes = plt.subplots(1, 2, figsize=(10.4, 4.2))
+    ax = axes[0]
+    for K, col, mk in ((2, C_A, 'o'), (3, C_C, 's')):
+        g = allp[allp['K'] == K].sort_values('资源规模R')
+        ax.scatter(g['资源规模R'], g['工作量均衡CV_W'], s=3.0, alpha=0.10,
+                   color=col, edgecolors='none', rasterized=True)
+        # 逐 R 的最优阶梯：同一资源规模下能达到的最小 CV
+        fr = g.groupby('资源规模R')['工作量均衡CV_W'].min()
+        ax.step(fr.index.values, fr.values, where='post', color=col, lw=2.2,
+                label='$K=%d$ 阶梯前沿' % K, zorder=4)
+        r_rec = float(cmp.loc[K, '资源规模R'])
+        cv_rec = float(cmp.loc[K, '工作量均衡CV_W'])
+        ax.plot([r_rec], [cv_rec], marker='*', ms=19, color=col, mec='black',
+                mew=0.8, zorder=6, label='$K=%d$ 推荐解' % K)
+        # 数值**不贴在星标旁**：K=2 那两行文本横跨 R≈31--34，正好压在 K=3 的星标上
+        # （星标 zorder 更高，会把「0.7544」盖掉一半）。改成左上角一列带白底的数值，
+        # 星标本体已经用颜色区分了 K，指向关系没有丢。
+        ax.text(0.02, 0.97 - 0.055 * (K - 2),
+                '$K=%d$ 推荐解：$R=%d$，$CV_W=%.4f$' % (K, r_rec, cv_rec),
+                transform=ax.transAxes, fontsize=10, color=col, va='top',
+                bbox=dict(fc='white', ec='none', alpha=0.85, boxstyle='round,pad=0.2'))
+    ax.set_xlabel('资源规模 $R$')
+    ax.set_ylabel('工作量均衡度 $CV_W$')
+    ax.set_title('分区解的资源规模—均衡性前沿')
+    ax.legend(loc='lower right', fontsize=9.5, framealpha=0.92)
+    ax.text(0.02, 0.06, '共 %d 个分区，\n库存可行者 %d 个'
+            % (len(allp), feas), transform=ax.transAxes, fontsize=10.5,
+            color=C_OUT, fontweight='bold', va='bottom',
+            bbox=dict(fc='white', ec='0.7', alpha=0.9, boxstyle='round,pad=0.3'))
+    panel_tag(ax, '(a)')
+
+    # (b) CV 的 ECDF：曲线越靠右，均衡度越差；推荐解落在分布的什么位置一眼可见
+    ax = axes[1]
+    for K, col in ((2, C_A), (3, C_C)):
+        v = np.sort(allp[allp['K'] == K]['工作量均衡CV_W'].values.astype(float))
+        ax.plot(v, np.arange(1, len(v) + 1) / len(v), color=col, lw=2.0,
+                label='$K=%d$（%d 个分区）' % (K, len(v)))
+        cv_rec = float(cmp.loc[K, '工作量均衡CV_W'])
+        # 与推荐解比较的方向**必须写对**：推荐解是「先最小化 R」挑出来的，R 取到全
+        # 部分区的最小值，均衡度因此落在分布的最差一端。若按 (v <= cv_rec) 报成
+        # 「优于其 X% 的同 K 分区」，X 会算成 100.0%——把「几乎最不均衡」印成
+        # 「优于全部」，方向恰好相反。这里报「比它更均衡者占多少」。
+        pct_better = float((v < cv_rec).mean()) * 100.0
+        ax.axvline(cv_rec, color=col, ls='--', lw=1.6)
+        # 竖排标注**不能挂在虚线上**：两条虚线只隔 0.081，而标注要占两行、旋转 90° 后
+        # 两行是横向铺开的，实测 K=3 那整块压住了 K=2 行的「0.7544」。改到右下角图例
+        # 之上横排：该带内两条 ECDF 都已升到 1.0，是整幅图里唯一没有被曲线穿过的空白。
+        ax.text(0.985, 0.34 - 0.085 * (K - 2),
+                '$K=%d$ 推荐解 $CV_W=%.4f$：同 $K$ 分区中 %.1f%% 比它更均衡'
+                % (K, cv_rec, pct_better), transform=ax.transAxes, fontsize=9.5, color=col,
+                ha='right', va='center',
+                bbox=dict(fc='white', ec='none', alpha=0.85, boxstyle='round,pad=0.2'))
+    ax.set_xlabel('工作量均衡度 $CV_W$')
+    ax.set_ylabel('累计比例')
+    ax.set_title('均衡度的经验分布')
+    ax.set_ylim(0, 1.0)
+    ax.legend(loc='lower right', fontsize=10)
+    panel_tag(ax, '(b)')
+
+    fig.tight_layout(w_pad=2.2)
+    save(fig, 'fig_q4_frontier.png')
+
+
 def main():
+    fig_sens_panel()
     fig_q1_pareto()
     fig_q1_payload()
     fig_q2_alns()
@@ -1362,8 +2104,12 @@ def main():
     fig_q2_exact()
     fig_q3_timeline()
     fig_q3_analysis()
+    fig_q3_plan_compare()
+    fig_q3_margin()
+    fig_q3_resource_gantt()
     fig_q4_resource()
     fig_q4_partition()
+    fig_q4_frontier()
     fig_resource_conflict()
     fig_solution_network()
     print('全部升级版配图已生成 ->', FIG)

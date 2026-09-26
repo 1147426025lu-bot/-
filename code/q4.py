@@ -142,8 +142,10 @@ def group_resources(trip_ids, trips, relay_of_group):
     # 中继无人机：占用到「返航 + 周转时间」为止，与 q3.schedule_relays 同口径。
     # 旧版只算到返航，少算了一段周转（本算例 300 s），于是同一条中继链上首尾
     # 相接的两个任务会被算成不重叠，峰值需求被系统性低估。
-    relay_veh = [(x['start'], x['return_t'] + x['turnover']) for x in relay_of_group]
-    relay_cmp = [(x['start'], x['cmp_end']) for x in relay_of_group]
+    # 再按**出动**归并：一次出动的多次访问共享同一段占用，逐行计会把它重复计入。
+    relay_out = relay_outings(relay_of_group)
+    relay_veh = [(x['start'], x['return_t'] + x['turnover']) for x in relay_out]
+    relay_cmp = [(x['start'], x['cmp_end']) for x in relay_out]
     res['relay'] = peak_concurrency(relay_veh)
     res['relay_comp'] = peak_concurrency(relay_cmp)
     return res
@@ -152,7 +154,9 @@ def group_resources(trip_ids, trips, relay_of_group):
 def workload(trip_ids, trips, relay_of_group):
     """工作量 = 该组的运输飞行器时 + 中继飞行器时（架次占用总时长，秒）。"""
     w = sum(trips[k]['duration'] for k in trip_ids)
-    w += sum(x['t_tot'] for x in relay_of_group)
+    # 中继的架次占用时长以**出动**计：一次出动服务多站时 `t_tot` 是整段行程的
+    # 时长，同一次出动的各行取同值，逐行累加会成倍虚增工作量。
+    w += sum(x['t_tot'] for x in relay_outings(relay_of_group))
     return w
 
 
@@ -176,14 +180,39 @@ def build_assignment(q3_sol, d):
 
 
 def build_relays(q3_sol, d):
-    """由问题三方案构造中继记录：占用到「返航 + 周转」，能源组件到充电完成。"""
+    """由问题三方案构造中继记录：占用到「返航 + 周转」，能源组件到充电完成。
+
+    一行 = 一次悬停站服务（与结果表同构）。自阶段 13 起一次出动可依次服务多个站，
+    同一出动的各行共享 `start`/`return_time`/`energy_kwh`，故额外带上 `outing`；
+    凡是按「占用」或「工作量」计的场合都必须先按 `outing` 归并（见
+    `relay_outings`），否则同一次出动会被重复计入峰值。旧方案没有 `outing_id`
+    字段，此时退回用 `relay_trip_id`，即每行自成一个出动——与旧口径逐位一致。
+    """
     rt = d.relay_type
     return [dict(id=r['relay_trip_id'], station=r['station_id'], start=r['start'],
                  return_t=r['return_time'], t_tot=r['return_time'] - r['start'],
                  turnover=float(rt['turnover']),
+                 outing=r.get('outing_id') or r['relay_trip_id'],
                  cmp_end=r['return_time'] + charge_time(
                      1.0 - r['energy_kwh'] / rt['E_use'], d.relay_batteries[1]))
             for r in q3_sol['relay_trips']]
+
+
+def relay_outings(relays):
+    """把中继记录按**出动**归并：一次出动 = 从 O01 出发到返回 O01 的完整行程。
+
+    占用与工作量都以出动为单位：同一次出动的多次访问共享同一段机身占用与同一份
+    能耗，逐行累加会把它们重复计入。归并键在 `build_relays` 里已经备好；返回的
+    顺序按首次出现定序，不依赖字典迭代，保证可复现。
+    """
+    out, seen = [], set()
+    for x in relays:
+        k = x.get('outing') or x['id']
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(x)
+    return out
 
 
 def join_relays(q3_sol, relays):
@@ -297,6 +326,10 @@ def main():
 
     assignment = build_assignment(q3_sol, d)
     relays = build_relays(q3_sol, d)
+    # 结果表的「一行 = 一次悬停站服务」不变，但一次出动可含多次访问：打印出两个数，
+    # 免得把 10 次访问读成 10 架次（峰值并发与占用一律按出动计，见 relay_outings）。
+    print('  其中中继出动 %d 次（%d 次悬停站服务）'
+          % (len(relay_outings(relays)), len(relays)))
     relay_of_trip = join_relays(q3_sol, relays)
 
     units = atomic_units(d, assignment)
@@ -361,9 +394,11 @@ def main():
         #   K=2：八类的 min_tot 全部 <= 库存（中继 2/2、B 型 2/2），没有任何一类
         #        是结构性缺口；库存可行分区数为 0 纯粹是「各类的最小值落在**不同**
         #        分区上」的联合约束结果。
-        #   K=3：中继无人机 min_tot=3 > 库存 2 —— 3 个非空组各至少要 1 架，库里只有
-        #        2 架，这是**结构性**的，与怎么分组无关；其余七类仍非结构性。
-        # 两个 K 都不可行，但不可行的成因不同，论文必须分开说。
+        #   K=3：同上，**八类的最小缺口同样全为 0**（中继无人机 min_tot=2 恰等于
+        #        库存 2）。本行在阶段 12 之前曾是「中继 min_tot=3 > 库存 2」——那是
+        #        按「每个非空组各要 1 架」的先验推的，已被交付数据证伪（S006 的三个
+        #        架次全程直连、无失效区间，它单独成组时中继需求为 0）。
+        # 两个 K 都不可行，且成因相同：联合约束，不是任何单类短缺。论文必须这么说。
         min_tot = {k: 10 ** 9 for k in RES_KEYS}
         for groups in partition_sets(units, K):
             n_part += 1
@@ -443,12 +478,15 @@ def main():
                 specs.append((f'{g}_bat', gp + '-B' + g,
                               [(assignment[k]['start'], assignment[k]['bat_end']) for k in kk],
                               [assignment[k]['trip_id'] for k in kk]))
+            # 中继的两类资源同样按**出动**计：一次出动的多次访问共享一段机身占用
+            # 与一份能耗，逐行画占用会画出重叠，与 `group_resources` 的峰值口径不符。
+            g_ro = relay_outings(g_rr)
             specs.append(('relay', gp + '-R',
-                          [(x['start'], x['return_t'] + x['turnover']) for x in g_rr],
-                          [x['id'] for x in g_rr]))
+                          [(x['start'], x['return_t'] + x['turnover']) for x in g_ro],
+                          [x['id'] for x in g_ro]))
             specs.append(('relay_comp', gp + '-RC',
-                          [(x['start'], x['cmp_end']) for x in g_rr],
-                          [x['id'] for x in g_rr]))
+                          [(x['start'], x['cmp_end']) for x in g_ro],
+                          [x['id'] for x in g_ro]))
             for key, prefix, ivs, tags in specs:
                 alloc, n_used = color_intervals(ivs, tags, prefix)
                 if n_used != res[key]:

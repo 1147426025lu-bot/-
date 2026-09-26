@@ -1,0 +1,32 @@
+% 本文件由 code/make_data_table.py 生成，请勿手改。
+% 规模列的数字是脚本运行时实地打开每个文件量出来的 shape；改动数据后重跑即可。
+% 「未进入求解链路」一行是如实标注：数据集里确实给了村镇点位/水体/水系/道路四个图层，
+% 但全文代码没有读取，故不从表里省掉，而是明写未用——省掉会让读者以为数据集只有六份。
+\begin{table}[htbp]
+	\centering
+	\small
+	\caption{题给数据的来源、结构与用途}
+	\label{tab:data-source}
+	% 五列都取 X：文件名与「来源与口径」都含不可断的长串（如 .xlsx 前缀），
+	% 若给自然宽度的 l/c 列，窄列的 \hsize 会被挤到几个 pt，一个汉字一行。
+	% 系数和必须等于 X 列数 5。规模列最窄，但其中最长的一条是 1309×1486。
+	\begin{tabularx}{\textwidth}{@{}>{\hsize=1.05\hsize}X >{\hsize=1.20\hsize}X >{\hsize=1.30\hsize}X >{\hsize=0.70\hsize}X >{\hsize=0.75\hsize}X@{}}
+		\toprule
+		数据文件 & 来源与口径 & 关键字段 & 规模（行$\times$列） & 用途 \\
+		\midrule
+		调度中心与服务区.xlsx & 题给附件一。\texttt{core.py:107} 以 \texttt{header=None} 读入，第 2 行为 O01、第 6--20 行为 S001--S015 & 编号、名称、经度、纬度、海拔、常住人口 & 21$\times$6 & 四问 \\
+		\midrule
+		运输无人机数据.xlsx & 题给附件一。\texttt{core.py:126}（机型参数）、\texttt{:155}（电池）、\texttt{:167}（两阶段充电）分三段解析 & 空载质量、最大载货质量、可用装载体积、航程、速度、电池可用能量、返航余量 $\rho$ & 22$\times$18 & 四问 \\
+		\midrule
+		中继无人机数据.xlsx & 题给附件一。\texttt{core.py:179}（机身）、\texttt{:205}（能源组件）、\texttt{:212}（悬停与通信功耗）分三段解析 & 起飞质量、悬停功率、通信功率、周转时间、能源组件容量 & 12$\times$19 & 二（门禁）、三、四问 \\
+		\midrule
+		物资需求与配送时限.xlsx & 题给附件一。\texttt{core.py:219} 只读 sheet「逐箱货箱清单」（同一文件的其余 sheet 未被代码使用） & 货箱编号、服务区、物资类型、单箱质量与体积、是否首批、首批截止时刻、期望送达时刻、应急优先系数 & 80$\times$9 & 二、三问 \\
+		\midrule
+		通信链路参数.xlsx & 题给附件一。\texttt{core.py:239} 逐行取值 & 载波频率、系统损耗、地形遮挡附加损耗、接收灵敏度、衰落裕量、各端发射功率与天线增益 & 16$\times$5 & 三问 \\
+		\midrule
+		镇龙乡及周边 30\,m DEM.mat & 题给附件二。\texttt{core.py:259} 经 \texttt{scipy.io.loadmat} 读入，含地理变换与 EPSG 码，用于把经纬度换算为栅格行列 & dem（高程栅格）、longitude、latitude、nodata、transform & 1309$\times$1486 & 四问 \\
+		\midrule
+		村镇点位／水体／水系／道路（.csv 与 .mat） & 随题给地理数据集提供；\texttt{code/} 全文无任何读取语句，本文的求解与绘图均未使用 & ---（未读取） & --- & 未进入求解链路 \\
+		\bottomrule
+	\end{tabularx}
+\end{table}

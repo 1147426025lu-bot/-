@@ -1,45 +1,63 @@
 \section{求解代码清单}
 
-本文全部求解代码位于项目 \texttt{code/} 目录，每个问题一个独立脚本，按序运行即可复现全文结果。所有代码均为 Python 3 实现，依赖标准科学计算与绘图库（numpy、pandas、matplotlib、seaborn、networkx，以及用于整数规划与二分求解的 scipy）。问题一、三、四的求解是确定性的（精确动态规划、整数规划与完全枚举），不含任何随机成分；问题二的大邻域自适应搜索是启发式，其随机流由脚本内的固定种子 \texttt{ALNS\_SEED} 初始化，故同一份代码重复运行的结果逐位一致，但该结果\textbf{依赖这一固定种子}——换种子会得到不同的解，本文不做多种子对照实验，也不据此声称该解已最优（其质量由 §6.3 的两层小规模精确解标定）。
+本文全部求解代码位于项目 \texttt{code/} 目录，每个问题一个独立脚本，按序运行即可复现全文结果。所有代码均为 Python 3 实现，依赖标准科学计算与绘图库（numpy、pandas、matplotlib、seaborn、networkx，以及用于整数规划与二分求解的 scipy）。问题一、三、四的求解是确定性的（精确动态规划、整数规划与完全枚举），不含任何随机成分；问题二的大邻域自适应搜索是启发式，其随机流由脚本内的固定种子 \texttt{ALNS\_SEED} 初始化，故同一份代码重复运行的结果逐位一致。为检验该结果对种子的依赖，本文另做多种子稳定性对照（\texttt{make\_seed\_stats.py}，$4$ 个架次档 $\times$ $5$ 个种子 $=$ \mtQtwoSeedRuns 个组合，落盘 \texttt{results/q2\_seeds.csv}，只读派生、不写任何方案记录）：种子之间的完工时刻极差随档位放宽而收窄，由 $K\le20$ 档的 \mtQtwoSeedSpreadKTwenty\,s 降到交付档 $K\le25$ 的 \mtQtwoSeedSpreadKTwentyFive\,s、$K\le30$ 档的 \mtQtwoSeedSpreadKThirty\,s，且 $K\le30$ 档 $5$ 个种子中有 \mtQtwoSeedSameKThirty 个落到四项指标逐位相同的解。该对照只回答「换一组种子结果会不会面目全非」，\textbf{不构成最优性证明}——本文仍不据此声称该解已最优，其质量由 §6.3 的两层小规模精确解标定。
 
 % 按《人工智能工具及输出使用规定》第 5 条，使用人工智能工具辅助编程的，应在程序前添加
 % 注释说明工具名称、版本/型号、开发机构与版本发布日期；各 .py 文件首部均已按要求标注。
-% 附录内的表号需与「附录 A」的字母编号一致，这里改用不浮动表格，避免跨节漂移。
-\begin{center}
-\begin{minipage}{\textwidth}
-	\captionof{table}{求解代码与结果文件清单}
-	\label{tab:code-list}
-	\centering
-	\begin{tabularx}{0.98\textwidth}{lX}
-		\toprule
-		文件 & 说明 \\
-		\midrule
+% 附录内的表号需与「附录 A」的字母编号一致，这里仍用不浮动表格，避免跨节漂移。
+% 本表 23 行、实测高约 840pt，而本版式 \textheight 只有约 688pt：原先把它装在
+% center + minipage 里，minipage 是不可断页的整体盒，于是无论怎么排都会溢出——
+% main.log 里那条 "Overfull \vbox (152.75189pt too high) while \output is active"
+% 就是它。改用 xltabular（longtable + X 列）让表跨页、表头在续页重复；它仍是非
+% 浮动表，故「避免跨节漂移」的初衷不变，表号也仍由 \thetable 的
+% \Alph{section}.\arabic{table} 给出，即 A.1。
+\begin{xltabular}{0.98\textwidth}{lX}
+	\caption{求解代码与结果文件清单}
+	\label{tab:code-list}\\
+	\toprule
+	文件 & 说明 \\
+	\midrule
+	\endfirsthead
+	% 续页表头：不重排表题（否则会重复编号），只补「（续）」并重排列头
+	\multicolumn{2}{@{}l}{\small（续）} \\
+	\toprule
+	文件 & 说明 \\
+	\midrule
+	\endhead
+	\bottomrule
+	\endlastfoot
 		code/core.py & 公共物理模型：数据加载、DEM 采样与遮挡判定、航段时间/能耗/航程、充电模型、通信链路模型 \\
 		code/q1.py & 问题一：最大安全载荷二分求解、同质类多重集动态规划组批、指派式与集合划分整数规划双路径复核、$\rho$--$\kappa$ 二维灵敏度 \\
 		code/solution\_io.py & 方案记录接口：问题二、三的方案落盘与读取、字段校验、外键检查、来源与求解器哈希一致性把关（下游读到过期或来源不符的方案即报错停止） \\
 		code/q2.py & 问题二：硬时限约束下的架次构造与共享电池离散事件调度、ALNS 破坏--修复搜索、$\varepsilon$-约束扫描、消融实验与记忆化 \\
-		code/q2\_v2.py & 问题二落盘所用的 v2 引擎（\texttt{--engine v2}）：区内精确组批（子集枚举＋位掩码动态规划）、路线全排列缓存与瓶颈感知选型、多种子档间热启动协议，以及落盘前的\textbf{中继门禁}（在问题二的等价最优解类内按第三问口径择序） \\
-		code/q3\_v2.py & 问题三的"运输重排 ↔ 中继归属"固定点迭代错峰路径；本算例 12 轮内未收敛，按字典序退回联合调度路径，论文 7.5 节如实记录了该结果与弃用原因 \\
+		code/q2\_v2.py & 问题二落盘所用的 v2 引擎（\texttt{--engine v2}）：区内精确组批（子集枚举＋位掩码动态规划）、路线全排列缓存与瓶颈感知选型、多种子档间热启动协议，以及落盘前的\textbf{中继门禁}（在问题二的同指标候选解之间按第三问口径择序） \\
+		code/q3\_v2.py & 问题三的"运输重排 ↔ 中继归属"固定点迭代错峰路径；在交付用的派工顺序上 2 轮即收敛且末端解与主路径逐项相同，故按"不更优则不替换"未被采用；在同指标候选筛选门禁生效前的旧顺序上 12 轮内不收敛。论文 7.5 节两条结果及其"收敛性依赖于进入迭代的时刻表"的判断均已如实记录 \\
 		code/q2\_exact.py & 问题二的两层小规模精确验证：列生成＋集合划分整数规划（分区层）、big-$M$ 析取混合整数规划（时序层） \\
 		code/q3.py & 问题三：轨迹采样与直连失效区间提取、三维悬停站集合覆盖整数规划、运输错峰与中继架次调度的联合优化 \\
+		code/q3\_chain.py & 问题三的中继出动链式服务：把"一次出动只服务一个悬停站、必返 O01"放宽为一次出动依次服务多站再返场；该模块是交付中继排班的实际来源（出动数与能耗按\emph{整次出动}核算），并提供 \texttt{allow\_chain=False} 档以复现旧规则 \\
+		code/q3\_legacy.py & 旧出动规则的\emph{冻结副本}：\textbf{不在任何求解路径上}（\texttt{q3.py}、\texttt{q3\_chain.py} 都不 import 它，也不在求解器哈希清单内），保留它是为了让回归用例 T23"旧规则逐位可复现"能跑起来——旧规则可复现本身就是一条要交付的结论 \\
 		code/q4.py & 问题四：原子任务单元并查集归并、受限增长串完全枚举、组列集合划分整数规划复核、分组峰值资源需求与缺口核算 \\
 		code/verify.py & 独立复核脚本：只读结果表重算第 9 章的全部硬约束、通信连续性与 DEM 离散化误差；每项返回通过与否并以非零退出码表示失败 \\
-		code/tests\_regression.py & 回归测试：方案读写的篡改检出、外键与来源校验、时间占用冲突的精确秒数、零中继场景、分段表空洞检出、中继回传链路检出、全部分区最小需求的独立枚举复核、打包预检等 31 项 \\
-		code/paper\_metrics.py & 全文数字的唯一来源：只读 \texttt{results/}，生成 \texttt{results/paper\_metrics.json} 与 \texttt{sections/generated\_metrics.tex} 中的 \verb|\mtXXX| 宏，每个数字带出处，缺文件即失败 \\
+		code/tests\_regression.py & 回归测试：方案读写的篡改检出、外键与来源校验、时间占用冲突的精确秒数、零中继场景、分段表空洞检出、中继回传链路检出、旧出动规则逐位可复现、全部分区最小需求的独立枚举复核、打包预检等 32 项 \\
+		code/check\_layout\_gates.py & 版式门禁：把四条 grep 判据（Overfull hbox / vbox、Reference / Citation undefined）与"摘要恰一页且下一页首行是目录"做成一次调用、一个退出码；缺 \texttt{pdftotext} 时如实报"未判定"并按失败退出 \\
+		code/paper\_metrics.py & 全文数字的唯一来源：只读 \texttt{results/}，生成 \texttt{results/paper\_metrics.json} 与 \texttt{sections/generated\_metrics.tex} 中的 \texttt{\textbackslash mtXXX} 宏，每个数字带出处，缺文件即失败 \\
 		code/fill\_results.py & 把 \texttt{results/*.csv} 回填进《结果提交模板》生成上传用结果表 \\
 		code/figures.py & 数据类配图生成脚本（地形图、灵敏度图、直连失效区分布图） \\
 		code/figures\_adv.py & 多面板高级配图脚本（帕累托前沿、ALNS 诊断、通信状态时序带、资源雷达图等） \\
+		code/make\_seed\_stats.py & 问题二多种子稳定性：取 \texttt{solve\_recommended\_v2} 已算出却未落盘的 $4$ 档 $\times$ $5$ 种子末态指标写成 \texttt{q2\_seeds.csv}；写盘前逐档对上 \texttt{q2\_scan.csv}，对不上即拒绝落盘 \\
+		code/make\_q3\_sens.py & 问题三与通信侧灵敏度：中继机数、服务时段合并窗口、审计步长三组扰动，外加遮挡附加损耗与接收门限各 $\pm3$\,dB，以及交付解的最小直连/接入裕量；先与 \texttt{q3\_coverage.csv} 逐位对上门禁再扰动 \\
+		code/make\_q4\_sens.py & 问题四库存—可行分区数阈值曲线：逐类各加 $m$ 件时可行分区数如何变化、补到哪个向量时第一个可行分区出现 \\
+		code/make\_data\_table.py & 生成 3.x 节「数据来源与结构」表：运行时实地量各文件的规模，\texttt{code/} 里指不出的量一律不进表 \\
+		code/make\_delivery\_table.py & 生成 7.7 节「逐箱交付对照」表：对齐问题二基线与问题三交付的 80 个货箱并逐箱核硬时限余量 \\
 		code/make\_roadmap.py & 生成总技术路线图的 .drawio 源文件（版式与图内数值的来源） \\
 		code/make\_q2\_algorithm.py & 生成问题二求解框架图的 .drawio 源文件（版式与图内数值的来源） \\
 		code/render\_drawio.py & 把 figures/ 下的 .drawio 示意图离线渲染为 PNG/PDF \\
+		build\_submission.py & 打包脚本（位于工程根目录）：按\textbf{白名单}归集源码、图表、结果与 AI 使用详情为 \texttt{提交包/支撑材料.zip}，并预检论文 PDF；\texttt{-{}-check} 只做校验不写盘 \\
 		results/*.csv & 各问题结果表（对应结果提交模板各 sheet）；\texttt{\_交付与复现说明.txt} 给出完整复现序列、哈希口径与\textbf{未做的复核}清单 \\
 		results/\_q2\_hash\_refresh.txt & 2026-09-24 一次哈希记账修补的历史留痕，已被 2026-09-25 的整链重解取代；保留它只为留下改过什么 \\
 		figures/*.drawio & 示意图的可编辑源文件（总技术路线图、问题二求解框架） \\
 		figures/*.png & 论文插图 \\
-		\bottomrule
-	\end{tabularx}
-\end{minipage}
-\end{center}
+\end{xltabular}
 
 \section{主要结果数据}
 

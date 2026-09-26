@@ -15,6 +15,7 @@
 用法：python code/make_roadmap.py
 输出：figures/fig_roadmap.drawio（再由 render_drawio.py 渲染为 PNG/PDF）
 """
+import csv
 import html
 import json
 import pathlib
@@ -24,7 +25,8 @@ import pathlib
 # 本图曾长期写着问题一的 "63.18 kWh"，而正文与结果表早已改成 59.236——图重新
 # 生成时不会报错，只是把旧数原样再画一遍。现在缺指标或文件缺失一律直接停。
 _HERE = pathlib.Path(__file__).resolve().parent
-_METRICS = _HERE.parent / 'results' / 'paper_metrics.json'
+_RESULTS = _HERE.parent / 'results'
+_METRICS = _RESULTS / 'paper_metrics.json'
 _M = None
 
 
@@ -49,6 +51,38 @@ def _num(name, nd=2):
 def _pct(name):
     """取百分比：paper_metrics 里存的是 '66.18\\%' 这种带 LaTeX 转义的字符串。"""
     return str(_mv(name)).replace('\\%', '').strip()
+
+
+def _csv(name):
+    """读一张 results/ 下的结果表。图上凡不涉优化目标本身的数字都从这里现取。"""
+    p = _RESULTS / name
+    if not p.exists():
+        raise SystemExit('缺 %s：图上数字必须与正文同源，不接受手写数字。' % p)
+    with p.open(encoding='utf-8-sig', newline='') as fh:
+        return list(csv.DictReader(fh))
+
+
+def _cn(n):
+    """阿拉伯数字转汉字，用于「六站」这类数量词；超出 0–9 原样返回数字。"""
+    n = int(n)
+    return '零一二三四五六七八九'[n] if 0 <= n <= 9 else str(n)
+
+
+# ---- 图上用到、但 paper_metrics.json 里没有的量，一律从 results/ 现读 ----
+# 这些量此前是手写字面量，图重新生成时不会报错，只会把旧数原样再画一遍：
+# 「三站 150/230/190 m」「K≤20…40」「间隙全为 0」「K=3 结构性缺 1 架」四条
+# 都已与正文脱节，其中末条与 8.3 节的声明直接相反。现在全部改成现读。
+
+# 问题二 ε-约束扫描的 K 档位（正文 6.2 节与结果表 q2_scan.csv 同源）
+K_GRID = '/'.join(str(k) for k in sorted({int(r['K上限']) for r in _csv('q2_scan.csv')}))
+# 问题三悬停站的离地高度区间（正文表 7.1 与 q3_stations.csv 同源）
+_ST_H = [float(r['悬停离地高度m']) for r in _csv('q3_stations.csv')]
+# 问题一最受限的服务区：C 型最大安全载荷最小者（正文 5.2 节表 5.2 同源）
+_WORST = min(_csv('q1_max_payload.csv'), key=lambda r: float(r['C']))
+# 问题四两种分组的分区数与资源规模（正文 8.3 节与结果表同源）
+_PART = _csv('q4_all_partitions.csv')
+_PART_K = {k: sum(1 for r in _PART if int(r['K']) == k) for k in (2, 3)}
+_R_K = {int(r['K']): int(r['资源规模R']) for r in _csv('q4_comparison.csv')}
 
 # ---------------------------------------------------------------- 版式参数
 W = 816                 # 画布宽（压到 \textwidth=455pt 后，17px 字约 9.5pt）
@@ -118,8 +152,8 @@ BANDS = [
         'stages': [
             {'label': '最大载荷', 'boxes': [
                 '二分法求\n最大安全载荷',
-                'C 型 S008',
-                '降至\n58.57 kg',
+                'C 型 %s' % _WORST['服务区'],
+                '降至\n%.2f kg' % float(_WORST['C']),
             ]},
             {'label': '货箱组批', 'boxes': [
                 '同质类多重集\n动态规划',
@@ -129,12 +163,14 @@ BANDS = [
                 '大区用 C\n小区用 B',
                 '%s 架次\n%s kWh' % (_mv('QoneTrips'), _num('QoneEnergy')),
             ]},
-            # 数值取自 results/q1_sensitivity.csv：C 型均值 78.69 kg(ρ=0.10) → 52.71 kg(ρ=0.40)，
-            # 即 ρ 每提升 10%，平均最大安全载荷下降 (78.69-52.71)/3 ≈ 8.7 kg。
+            # 数值取自 paper_metrics.json 的 QoneSensRhoDropC：C 型平均最大安全载荷在
+            # ρ=0.10→0.40 的三个档位上共降 26.04 kg，折合每 +0.10 降 8.7 kg。
+            # 不写「每增 10%」：ρ 是绝对值（0.10→0.40），「10%」既可读成十个百分点、
+            # 也可读成相对量。此处与正文 9.2 节的更正口径一致。
             {'label': '灵敏度', 'boxes': [
                 '返航余量扫描',
-                '余量每增 10%',
-                'C 型降\n8.7 kg',
+                'ρ 每增 0.10',
+                'C 型降\n%.1f kg' % (float(_mv('QoneSensRhoDropC')) / 3.0),
             ]},
         ],
     },
@@ -155,9 +191,12 @@ BANDS = [
                 '%s 架次\n零违约' % _mv('QtwoTrips'),
                 '%s kWh\n%d s' % (_num('QtwoEnergy'), round(float(_mv('QtwoMakespan')))),
             ]},
+            # 「间隙全为 0」只对 A 层成立。q2_exact.csv 的 B2 行是 已证最优=0、
+            # 上下界间隙=0.657737（65.77%）且超时，正文 6.4 节与摘要均已按此限定，
+            # 图上不能再写全称。
             {'label': '方案对比', 'boxes': [
-                'ε-约束扫描\nK≤20…40',
-                '两层精确验证\n间隙全为 0',
+                'ε-约束扫描\nK 上限档位\n%s' % K_GRID,
+                '两层精确验证\nA 层间隙全 0\nB2 未证最优',
             ]},
         ],
     },
@@ -174,7 +213,10 @@ BANDS = [
             {'label': '中继选址', 'boxes': [
                 '候选悬停点\n网格生成',
                 '集合覆盖\n整数规划',
-                '三站离地高度\n150/230/190m',
+                # 站数与高度取自 results/q3_stations.csv（与正文表 7.1 逐位一致）。
+                # 这里曾写「三站 150/230/190 m」——CSV 里既没有三站，也没有这三个高度。
+                '%s站离地高度\n%g~%g m' % (_cn(_mv('QthreeStations')),
+                                          min(_ST_H), max(_ST_H)),
             ]},
             {'label': '中继调度', 'boxes': [
                 '中继 %s 架次' % _mv('QthreeRelays'),
@@ -197,18 +239,19 @@ BANDS = [
             ]},
             {'label': '任务分组', 'boxes': [
                 '受限增长串\n完全枚举',
-                '分区数\n2047 / 86526',
+                '分区数\n%d / %d' % (_PART_K[2], _PART_K[3]),
             ]},
             {'label': '峰值并发', 'boxes': [
                 '分组独立执行',
                 '峰值资源需求',
             ]},
-            # 两种分组的不可行成因不同，这条带必须把它们分开写：K=3 的中继无人机是
-            # 结构性短缺（每个含失效区间的组至少占 1 架，3 组的下界 3 已超过库存 2），
-            # K=2 则不是任何单类短缺，纯粹来自「没有分区能同时取到八类最小值」的联合约束。
+            # 这里曾写「K=3 中继结构性缺 1 架」，依据的是早先较粗的原子单元划分。
+            # 现行 12 单元划分下 q4_comparison.csv 的「最小缺口_中继无人机」两种 K 都是 0，
+            # 即没有任何一类存在结构性短缺；不可行来自「无分区能同时取到八类最小值」。
+            # 正文 8.3 节已明写不再作此表述，图上不能还挂着相反的说法。
             {'label': '资源缺口', 'boxes': [
-                'K=3 中继\n结构性缺1架',
-                '其余各类\n非结构性缺',
+                '无单类短缺\n缺口来自联合',
+                '资源规模 R\n%d / %d' % (_R_K[2], _R_K[3]),
                 '库存可行\n分区数为 0',
             ]},
         ],

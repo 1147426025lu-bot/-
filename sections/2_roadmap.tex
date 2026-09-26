@@ -4,7 +4,7 @@
 
 本题是复杂地形与通信约束下运输、中继与能源多类要素的协同优化问题，四个子问题呈递进关系，公共物理规则、单位与对象编号保持一致。
 
-\textbf{问题一}是能力评估与组批问题。每个架次为单服务区直接往返，故各服务区相互独立，问题可分解为“最大安全载荷计算”与“货箱装箱组批”两个层次。前者由地形净空、等效航程与爬升附加能耗共同决定，可用二分法精确求解；后者是一维装箱（bin packing）问题\cite{martello1990knapsack}，需同时满足质量、体积与能量余量约束。
+\textbf{问题一}是能力评估与组批问题。每个架次为单服务区直接往返，故各服务区相互独立，问题可分解为“最大安全载荷计算”与“货箱装箱组批”两个层次。前者由地形净空、等效航程与爬升附加能耗共同决定，可用二分法精确求解；后者是带质量与体积\textbf{双容量}约束的组批问题（二维装箱的变体）\cite{martello1990knapsack}，并叠加返航能量余量约束，故不能按单一容量的一维装箱处理。
 
 \textbf{问题二}是带资源约束的多机型车辆路径问题（VRP）的推广\cite{dorling2017vehicle}。相比经典 VRP，其难点在于：载荷随投送过程递减使得航段能耗非线性；共享电池按机型分池且需两阶段充电周转；医疗与首批物资带硬时限。由于规模较大且约束耦合，本文采用“构造基线＋大邻域自适应搜索（ALNS）＋$\varepsilon$-约束扫描”的框架：把派工顺序升为一等决策变量，与货箱划分共同搜索，用 $\varepsilon$-约束把架次数上限逐档扫描成非支配前沿；另以两层小规模精确验证（分区层集合划分整数规划、时序层 big-M 析取 MILP）为启发式解提供独立证据，并以消融实验区分“派工顺序”与“组批搜索”的贡献。
 
@@ -26,3 +26,36 @@
 \begin{center}
 	\includegraphics[width=0.97\textwidth]{figures/fig_roadmap.pdf}
 \end{center}
+
+% 路线图按上面的注释占满整页（余量约 27pt），故此处必须 \clearpage 另起一页再排总表：
+% 任何浮动体插在路线图之前都会把这一页顶成 Overfull \vbox。
+% 表内一律用 \mtXXX 宏、不写结果字面量——这是全文第一张结果表，它一旦与 results/
+% 脱钩，后面每一张表都会被拿来与它对照，错一处就是全篇的信誉问题。
+\clearpage
+\subsection{四问推荐方案一览}
+
+四个问题的推荐方案与复核方式汇总于表~\ref{tab:overview}。这张表只列\textbf{最终交付的那一个方案}，不列扫描过的中间档；每行的「复核与验证」栏写的是该方案另走过的独立路径，而不是同一套代码的自证。表中全部数值由 \texttt{code/\allowbreak paper\_\allowbreak metrics.py} 从 \texttt{results/} 下的结果表读出后写成宏，正文与表格共用同一来源，故不存在两处手写同一个数的可能。
+
+\begin{table}[htbp]
+	\centering
+	\small
+	\caption{四问推荐方案与复核一览}
+	\label{tab:overview}
+	% 四列全取按比例 X 列，系数和必须等于 X 列数 4.00（tabularx 的要求）。
+	% 「推荐方案」列最长（含三个带单位的指标），故系数最大。
+	\begin{tabularx}{\textwidth}{@{}>{\hsize=0.62\hsize}X >{\hsize=1.05\hsize}X >{\hsize=1.28\hsize}X >{\hsize=1.05\hsize}X@{}}
+		\toprule
+		问次 & 模型与算法 & 推荐方案 & 复核与验证 \\
+		\midrule
+		问题一 & 同质类多重集动态规划（机型并入架次模式），二分求三型在各区的最大安全载荷 & \mtQoneTrips\ 架次、\mtQoneEnergy\,kWh、作业 \mtQoneWorkTimeH\,h；目标按「架次$\to$能耗$\to$时间」字典序 & 指派式、集合划分与混用机型三条整数规划路径，\mtQoneIlpAgree/\mtQoneIlpCases\ 逐行一致 \\
+		\midrule
+		问题二 & 大邻域自适应搜索（ALNS）＋ $\varepsilon$-约束扫描，派工顺序升为决策变量 & \mtQtwoRecTrips\ 架次、\mtQtwoEnergy\,kWh、完工 \mtQtwoMakespan\,s；加权时延 \mtQtwoTardiness、硬违约 \mtQtwoHardViol & 两层小规模精确验证 \mtQtwoExactProved/\mtQtwoExactCases\ 例获最优性证书（\mtQtwoExactTimeout\ 例超时，以上界报告）；另有 \mtQtwoSeedRuns\ 次多种子运行，其中 \mtQtwoSeedFeas\ 次均可行 \\
+		\midrule
+		问题三 & 集合覆盖整数规划选站 ＋ 运输时刻与悬停高度联合优化 ＋ 资源链级联错峰 & \mtQthreeStations\ 个悬停站、中继能耗 \mtQthreeRelayEnergy\,kWh、联合完工 \mtQthreeJointDone\,s；中断时间占比 \mtQthreeGap & 沿三维轨迹逐时刻审计（步长 \mtQthreeCoverageStep\,s）；交付零迟到，最小硬时限余量 \mtQthreeMinMarginFine\,s \\
+		\midrule
+		问题四 & 并查集绑定原子单元 ＋ 完全枚举，另以组列集合划分整数规划复核 & 推荐 $K=\mtQfourK$：资源规模 $R=\mtQfourR$、均衡度 $CV_W=\mtQfourCV$；$K=2$ 与 $K=3$ 分别为 \mtQfourPartKTwo\ 与 \mtQfourPartKThree\ 种分区 & 库存可行分区数 \mtQfourFeasible；推荐分区缺口 \mtQfourGapSum\ 件；两条路径的资源规模一致 \\
+		\bottomrule
+	\end{tabularx}
+\end{table}
+
+表~\ref{tab:overview}里有两处需要点明。其一，四问的「推荐方案」是\textbf{同一方案链}上的四个断面：问题一的组批给出容量输入，问题二的 24 个架次被问题三原样保留（只后移开始时刻），问题四的原子单元又由问题三的架次构成决定——任一环改动，后面三行的数字都会跟着变，这正是它们能放在同一张表里对照的前提。其二，\textbf{四问的复核路径互不相同}：问题一走的是三条整数规划，问题二走的是两层小规模精确解，问题三走的是逐时刻重算与零迟到审计，问题四走的是第二条枚举口径；它们都不是把求解器再跑一遍，故这张表同时也是「结论不依赖某一条代码路径」的汇总声明。

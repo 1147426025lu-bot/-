@@ -50,7 +50,8 @@ import numpy as np                                                 # noqa: E402
 
 import q3                                                          # noqa: E402
 import q2                                                          # noqa: E402
-from core import charge_time                                       # noqa: E402
+from core import (charge_time, segment_geometry,                     # noqa: E402
+                  relay_flight_energy, relay_hover_energy)
 
 # 与 q2_v2 同理：`python code/q3.py` 时若本模块再 `import q3`，会拿到第二份 q3
 # 副本（另一套模块级常量与状态）。本模块只调用 q3 的纯函数，数值上不会不同，
@@ -245,8 +246,11 @@ def self_check(d, base_asg, intervals, sel, cands, verbose=True):
     1) 释放量全 0 时 `resimulate` 必须逐位复现原排班，且不产生资源冲突。
        这条是整套固定点的地基：不成立就说明「开始 = max(资源空闲, 基准+释放)」
        与我方 `q2.schedule` 的口径不一致，后面所有轮次都建立在错的基准上。
-    2) 中继能耗口径：`q3.schedule_relays` 产出的每个中继架次，其 E 必须等于
-       `q3.relay_trip_cost` 在该悬停站与该服务时长下的 E。移植没有换过成本模型。
+    2) 中继能耗口径：`q3.schedule_relays` 产出的每一次**出动**，其 E 必须等于
+       沿该次出动实际路径（O01→站₁→…→站_n→O01）逐段重算的飞行能耗 + 各站悬停
+       能耗之和。阶段 13 起一次出动可站间接续，逐行拿 `q3.relay_trip_cost` 去比
+       在连飞下必然对不上（那正是接续省下来的转场），故改为按出动沿路径重算——
+       这仍是独立于排班器内部记账的第二次计算。
     """
     ok = True
     same = resimulate(d, base_asg, [0.0] * len(base_asg))
@@ -261,13 +265,29 @@ def self_check(d, base_asg, intervals, sel, cands, verbose=True):
 
     jobs = q3.merge_jobs(intervals, sel)
     relays, _sk = q3.schedule_relays(d, jobs, cands)
-    worst = 0.0
+    by_out = {}
     for x in relays:
-        ref = q3.relay_trip_cost(d, (x['lon'], x['lat'], x['alt_abs']), x['t_service'])
-        worst = max(worst, abs(ref['E'] - x['E']))
+        by_out.setdefault(x['outing'], []).append(x)
+    rt = d.relay_type
+    worst = 0.0
+    n_chain = 0
+    for od in sorted(by_out):
+        rows = sorted(by_out[od], key=lambda x: x['seq'])
+        n_chain += len(rows) - 1
+        prev = (d.O01['lon'], d.O01['lat'], d.O01['alt'])
+        E = 0.0
+        for x in rows:
+            E += relay_flight_energy(rt, segment_geometry(
+                d.dem, prev[0], prev[1], prev[2], x['lon'], x['lat'], x['alt_abs']))
+            E += relay_hover_energy(rt, x['t_service'])
+            prev = (x['lon'], x['lat'], x['alt_abs'])
+        E += relay_flight_energy(rt, segment_geometry(
+            d.dem, prev[0], prev[1], prev[2],
+            d.O01['lon'], d.O01['lat'], d.O01['alt']))
+        worst = max(worst, abs(E - rows[0]['E']))
     if worst > 1e-9:
         ok = False
     if verbose:
-        print(f'  中继能耗口径对拍：{len(relays)} 个架次，与 relay_trip_cost 的'
-              f'最大偏差 {worst:.3e} kWh（必须为 0）')
+        print(f'  中继能耗口径对拍：{len(by_out)} 次出动（其中站间接续 {n_chain} 次），'
+              f'沿实际路径重算与方案能耗的最大偏差 {worst:.3e} kWh（必须为 0）')
     return ok

@@ -1325,6 +1325,162 @@ def t_packaging_preflight():
                   tolerance='缺项必须逐条列出并使预检失败')
 
 
+# --- T23 -------------------------------------------------------------------
+# 场景是**手工构造**的，不是从结果表反推：这里只需要一份非平凡、可复现的
+# (jobs, cands) 输入，用来并排跑两个排班器。窗口刻意这样排——
+#   ① 第一个 job 的窗口很短且早，给第一架中继机一个「服务到 t2」的悬停任务；
+#   ② 第二个 job 排在另一站、且比「返场换组件后再出发」更晚，于是「上一站直接
+#      转场过去」在建链完成时刻上严格更早，贪心必然选中它——连飞档这才真的被
+#      走到，而不是靠运气；
+#   ③ 末尾一个窗口短到连准备都来不及，制造固定的弃飞样本。
+_T23_SCENARIO = [
+    # (站序号, t1, t2)
+    (0, 2000.0, 3000.0),
+    (1, 4500.0, 5500.0),
+    (2, 6500.0, 7500.0),
+    (3, 0.0, 30.0),          # 必弃飞：prep+link = 210 s 已超过 t2
+]
+
+
+@case
+def t_q3_relay_chain_modes():
+    """T23：中继排班器的两个档必须各守本分（阶段 13）。
+
+    ① 不连飞档（`allow_chain=False`）必须与**冻结的旧实现**
+       `code/q3_legacy.py`（阶段 13 之前的 `q3.schedule_relays` 逐字副本）在
+       每一个字段上**逐位相等**，包括弃飞架次的到达时刻。旧规则可复现是「旧解
+       保留为对照」这句话的技术内容；阶段 13 把 `q3.schedule_relays` 改成转发到
+       `q3_chain` 之后，只有拿冻结副本比才还能证明这件事。
+    ② 连飞档：一次出动服务多个站，`Σ(本访问能耗份额) == 出动能耗` 必须**精确成立**
+       （这是「接续省掉的那段返场」在记账上的全部内容），且每次出动能耗不得超过
+       可用能量 (1-ρ)·E_use。份额与出动时刻要落进结果表并接受 verify.py 的复核，
+       所以这条恒等式不能在求解器内部悄悄用容差糊过去。
+    ③ **单访问出动**另用一份只有一个 job 的场景单独验同一条恒等式。这一条不是
+       冗余：`_T23_SCENARIO` 的三站窗口一定被贪心串成**一次**接续出动，于是它
+       只覆盖了「接续出动」那一半。份额的构造里首站份额只有「进场航段 + 本站
+       悬停」、末端返航是在定稿时才补记到**末次**访问上的；只覆盖接续情形时，
+       这两件事恰好同时发生而互相掩盖，一旦某次出动只服务一个站，它的份额之和
+       就会比出动能耗少一整段返航。这个缺陷真的漏过去过一次——是问题二的中继
+       门禁在真实算例上把它抓出来的（D03：0.3608 vs 0.5045 kWh）。
+
+    只读 `q3_stations.csv` 取真实站址几何（不重跑问题二三的重活）。
+    """
+    miss = _need('q3_stations.csv')
+    if miss:
+        return result('T23 中继排班两档', True, skipped=True,
+                      errors=['缺 %s，请先运行 python code/q3.py' % '、'.join(miss)])
+    q3 = _mod('q3')
+    q3_chain = _mod('q3_chain')
+    q3_legacy = _mod('q3_legacy')
+    d, _q1 = _data()
+    if not hasattr(d, 'geo'):
+        import q2
+        d.geo_nodes, d.geo = q2.precompute_geometry(d)
+
+    stn = pd.read_csv(os.path.join(OUT, 'q3_stations.csv'), encoding='utf-8-sig')
+    if len(stn) < 4:
+        return result('T23 中继排班两档', True, skipped=True,
+                      errors=['悬停站少于 4 个，构造不出场景'])
+    cands = [dict(id=r['悬停站编号'], lon=float(r['悬停经度']), lat=float(r['悬停纬度']),
+                  alt_abs=float(r['悬停海拔m']), agl=float(r['悬停离地高度m']),
+                  ground=float(r['地面高程m']))
+             for _, r in stn.iterrows()]
+    jobs = [dict(ci=ci, t1=t1, t2=t2, ivs=[i])
+            for i, (ci, t1, t2) in enumerate(_T23_SCENARIO)]
+
+    t_old, s_old = q3_legacy.schedule_relays(d, jobs, cands)
+    t_new, s_new = q3_chain.schedule_relays(d, jobs, cands, allow_chain=False)
+    t_chn, s_chn = q3_chain.schedule_relays(d, jobs, cands, allow_chain=True)
+
+    errs = []
+    # ① 逐位一致：时间/编号/布尔用 ==，浮点用严格 != （不用容差）
+    F_T = ['relay', 'comp', 'station', 'start', 'link_done', 'service_end',
+           'return_t', 't_service', 'late']
+    F_F = ['E', 'lon', 'lat', 'alt_abs', 'hover_agl', 'ground_elev']
+    if len(t_old) != len(t_new):
+        errs.append('架次数不一致：旧 %d vs 不连飞档 %d' % (len(t_old), len(t_new)))
+    else:
+        for i, (a, b) in enumerate(zip(t_old, t_new)):
+            for f in F_T:
+                if a[f] != b[f]:
+                    errs.append('第%d条 %s 不一致：%r vs %r' % (i, f, a[f], b[f]))
+            for f in F_F:
+                if float(a[f]) != float(b[f]):
+                    errs.append('第%d条 %s 不逐位相等：%r vs %r（差 %.3e）'
+                                % (i, f, a[f], b[f], float(a[f]) - float(b[f])))
+            if a['ivs'] != b['ivs']:
+                errs.append('第%d条 ivs 不一致' % i)
+    if len(s_old) != len(s_new):
+        errs.append('弃飞数不一致：旧 %d vs 不连飞档 %d' % (len(s_old), len(s_new)))
+    else:
+        for i, (a, b) in enumerate(zip(s_old, s_new)):
+            if float(a['arrive']) != float(b['arrive']):
+                errs.append('弃飞第%d条 arrive 不逐位相等：%r vs %r'
+                            % (i, a['arrive'], b['arrive']))
+    if not s_old:
+        errs.append('场景没能造出弃飞样本，这条用例失去了一半的覆盖（见 _T23_SCENARIO）')
+
+    # ② 不连飞档：一次出动只服务一个站
+    n_multi = len({x['outing'] for x in t_new}) - len(t_new)
+    if n_multi != 0 or any(x['chain'] for x in t_new):
+        errs.append('不连飞档出现了接续：出动数 %d、访问数 %d'
+                    % (len({x['outing'] for x in t_new}), len(t_new)))
+
+    # ③ 连飞档：份额恒等式 + 能量上限
+    cap = (1 - d.relay_type['rho']) * d.relay_type['E_use']
+    by_out = {}
+    for x in t_chn:
+        by_out.setdefault(x['outing'], []).append(x)
+    worst, n_over, n_chain = 0.0, 0, 0
+    for od, rows in by_out.items():
+        n_chain += len(rows) - 1
+        dev = abs(sum(x['visit_E'] for x in rows) - rows[0]['E'])
+        worst = max(worst, dev)
+        if dev > 1e-12:
+            errs.append('出动 %s 的能耗份额之和不等于出动能耗：差 %.3e kWh' % (od, dev))
+        if rows[0]['E'] > cap + 1e-9:
+            n_over += 1
+            errs.append('出动 %s 能耗 %.6f 超过可用 %.2f kWh' % (od, rows[0]['E'], cap))
+        if len({(x['start'], x['return_t'], x['E']) for x in rows}) != 1:
+            errs.append('出动 %s 的各访问行出动级字段不一致' % od)
+        for x in rows:
+            if x['visit_E'] <= 0:
+                errs.append('出动 %s 出现非正的访问能耗份额' % od)
+    if n_chain < 1:
+        errs.append('场景没能造出接续样本（见 _T23_SCENARIO 的窗口排布）')
+    if len(s_chn) != len(s_old):
+        errs.append('连飞档的弃飞数与旧档不同：%d vs %d' % (len(s_chn), len(s_old)))
+
+    # ④ 单访问出动：只有一个 job，且它的窗口宽到必然派得出去——连飞的候选 A 需
+    #    要「上一站」存在，故这条路径只能走候选 B（返场换组件重新出动），产出一次
+    #    只服务一个站的出动。同一条恒等式必须在这里也精确成立。
+    solo = [dict(ci=0, t1=2000.0, t2=3000.0, ivs=[0])]
+    t_one, s_one = q3_chain.schedule_relays(d, solo, cands, allow_chain=True)
+    if len(t_one) != 1 or s_one:
+        errs.append('单 job 场景没造出「一次出动一次访问」：访问 %d、弃飞 %d'
+                    % (len(t_one), len(s_one)))
+    else:
+        r = t_one[0]
+        if r['chain'] or r['E'] > cap + 1e-9:
+            errs.append('单 job 场景的出动标记或能耗异常：chain=%r、E=%.6f'
+                        % (r['chain'], r['E']))
+        dev1 = abs(r['visit_E'] - r['E'])
+        worst = max(worst, dev1)
+        if dev1 > 1e-12:
+            errs.append('单访问出动的份额之和不等于出动能耗：%.12f vs %.12f（差 %.3e）'
+                        % (r['visit_E'], r['E'], dev1))
+
+    return result('T23 中继排班两档', not errs, errs,
+                  metrics={'旧/不连飞 架次': '%d/%d' % (len(t_old), len(t_new)),
+                           '弃飞': '%d（两档相同）' % len(s_old),
+                           '连飞档 访问/出动/接续': '%d/%d/%d'
+                           % (len(t_chn), len(by_out), n_chain),
+                           '单访问出动': '%d 次（含其份额）' % len(t_one),
+                           '份额恒等式最大偏差': '%.3e kWh' % worst,
+                           '超限出动': n_over},
+                  tolerance='不连飞档与冻结旧实现逐位相等（无容差）；份额恒等式 1e-12')
+
+
 # --- T22 -------------------------------------------------------------------
 @case
 def t_excel_column_mapping():

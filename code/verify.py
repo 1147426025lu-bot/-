@@ -17,7 +17,8 @@ results/*.csv 重新算一遍，DEM 离散化误差从原始 .mat 重新采样�
 论文中只能引用本脚本 PASS 的项；未跑到、跳过或失败的项必须如实降级表述。
 
 用法：python code/verify.py
-输出：屏幕报告，对应论文表 9.0--9.3 与 9.4 节的数值；全部通过时退出码 0。
+输出：屏幕报告，每项检查的表号即论文第 9 章的表号（9.1--9.8，逐一对应）；
+全部通过时退出码 0。
 """
 import re
 import sys
@@ -81,7 +82,7 @@ def _inp(name):
 
 
 # ---------------------------------------------------------------------------
-# 表 9.0  问题一
+# 表 9.1  问题一
 # ---------------------------------------------------------------------------
 def _parse_plan(s):
     """解析 q1_pareto.csv 的『方案』列：'S002:2B1+C1' -> {区: (架次数, {机型: 架次数})}。"""
@@ -103,7 +104,7 @@ def _parse_plan(s):
 
 
 def check_q1(d):
-    """表 9.0：问题一推荐组批方案的独立复核。
+    """表 9.1：问题一推荐组批方案的独立复核。
 
     只读 results/q1_recommended_batching.csv 与原始数据，用 core 的物理函数
     重新计算每架次的质量、体积、能耗与时间，不复用 q1.py 的任何中间量。
@@ -243,7 +244,7 @@ def check_q1(d):
 
 
 def check_q1_ilp(d):
-    """表 9.0b：问题一「真实箱号子集 + 机型」集合划分 ILP 与 DP 的交叉复核。
+    """表 9.2：问题一「真实箱号子集 + 机型」集合划分 ILP 与 DP 的交叉复核。
 
     读 q1_ilp_mixed.csv 的**状态列**：只有 status='ok' 且 (k, E) 都对上的算「一致」。
     列数超限、超时、N/A 一律不计入一致数——未复核不等于一致，两者必须分开报。
@@ -274,10 +275,10 @@ def check_q1_ilp(d):
 
 
 # ---------------------------------------------------------------------------
-# 表 9.1  问题二
+# 表 9.3  问题二
 # ---------------------------------------------------------------------------
 def check_hard_constraints(d):
-    """表 9.1：问题二推荐方案的硬约束独立复核。
+    """表 9.3：问题二推荐方案的硬约束独立复核。
 
     时限口径（F07）：一个货箱可能**同时**受「医疗期望送达」与「首批保障截止」
     两条限制，两条必须分别检查——旧版用一个 hard 变量顺序覆盖，医疗违约被首批
@@ -430,10 +431,24 @@ def check_hard_constraints(d):
 
 
 # ---------------------------------------------------------------------------
-# 表 9.2  问题三中继方案
+# 表 9.4  问题三中继方案
 # ---------------------------------------------------------------------------
+def _relay_outings(rt):
+    """把中继结果表按 `出动编号` 去重成**一次出动一行**。
+
+    自阶段 13 起 `q3_relay_trips.csv` 的一行 = 一次悬停站服务，同一次出动的多行
+    共享 `出动编号`，且出动级的 `开始时刻s` / `返回O01时刻s` / `架次能耗kWh` 取
+    同值。而"能源上限""架次不重叠""组件周转"这三条约束的对象都是**出动**：
+    逐行去判会把同一次出动当成两段互斥占用而误报重叠，也会把同一次出动的能耗
+    重复累加。旧方案表没有该列，此时退回逐行——那正好等价于"一次出动只服务一站"。
+    """
+    if '出动编号' not in rt.columns:
+        return rt
+    return rt.drop_duplicates(subset=['出动编号'], keep='first')
+
+
 def check_relay(d):
-    """表 9.2：问题三中继方案的硬约束独立复核。
+    """表 9.4：问题三中继方案的硬约束独立复核。
 
     同样只读 q3_relay_trips.csv / q3_comm_phases.csv 两张结果表：悬停离地高度
     不采信结果表里记的数值，而是拿表里的经纬度回原始 DEM 重新取地面高程再算；
@@ -445,11 +460,42 @@ def check_relay(d):
     cap = (1 - R['rho']) * R['E_use']
     bad = []
 
-    # 1) 能量裕度
-    ratios = (rt['架次能耗kWh'] / cap).to_numpy()
-    for _, r in rt.iterrows():
+    # 0) 出动级字段自洽：同一次出动的每一行必须给出相同的出动级时刻与能耗，
+    #    且各次访问的能耗份额之和必须等于该次出动的能耗。这是"站间接续省掉一次
+    #    返场"在结果表里的记账口径——若表内自相矛盾，下面按出动去重的三条判断
+    #    就没有可依托的分组键。份额求和的容差按项数放大（每项各带半个末位）。
+    n_out_bad, n_out = 0, 0
+    worst_share, worst_share_tol = 0.0, 0.0
+    if '出动编号' in rt.columns:
+        for od, g in rt.groupby('出动编号'):
+            n_out += 1
+            for col in ('中继无人机编号', '能源组件编号'):
+                if g[col].nunique() > 1:
+                    n_out_bad += 1
+                    bad.append('出动 %s 的各访问行 %s 不一致' % (od, col))
+            for col in ('开始时刻s', '返回O01时刻s', '架次能耗kWh'):
+                if float(g[col].max()) - float(g[col].min()) > TOL:
+                    n_out_bad += 1
+                    bad.append('出动 %s 的各访问行 %s 不一致' % (od, col))
+            if '本访问能耗kWh' in g.columns:
+                tol = tol_sum(len(g) + 1, TOL_E)
+                dev = abs(float(g['本访问能耗kWh'].sum())
+                          - float(g['架次能耗kWh'].iloc[0]))
+                if dev > worst_share:
+                    worst_share, worst_share_tol = dev, tol
+                if dev > tol:
+                    n_out_bad += 1
+                    bad.append('出动 %s 的各访问能耗份额之和与出动能耗不符：'
+                               '差 %.3e kWh（容差 %.1e）' % (od, dev, tol))
+
+    # 1) 能量裕度：上限按**出动**核，一次出动把整条路径（含各段转场）的能量算在一起
+    out = _relay_outings(rt)
+    ratios = (out['架次能耗kWh'] / cap).to_numpy()
+    for _, r in out.iterrows():
         if r['架次能耗kWh'] > cap + 1e-9:
-            bad.append('中继架次 %s 能耗超限' % r['中继架次编号'])
+            bad.append('中继出动 %s（代表架次 %s）能耗超限 %.6f > %.6f'
+                       % (r.get('出动编号', r['中继架次编号']),
+                          r['中继架次编号'], r['架次能耗kWh'], cap))
     # 1b) 中继无人机与能源组件编号必须在册、机型一致
     n_uav_bad = 0
     uav_ids = {u['id'] for u in d.relay_uavs}
@@ -470,18 +516,20 @@ def check_relay(d):
     if over_h:
         bad.append('%d 个中继架次悬停高度超限' % over_h)
 
-    # 3) 中继无人机：同一架的架次时段不得重叠
+    # 3) 中继无人机：同一架的**出动**时段不得重叠。占用区间取整次出动
+    #    [离开 O01, 返回 O01]——接续的后续访问不再各自成段，而是把同一段占用延长。
     n_uav = 0
-    for rid, g in rt.groupby('中继无人机编号'):
+    for rid, g in out.groupby('中继无人机编号'):
         iv = sorted(zip(g['开始时刻s'], g['返回O01时刻s'], g['中继架次编号']))
         for a, b in zip(iv, iv[1:]):
             if b[0] < a[1] - TOL:
                 n_uav += 1
                 bad.append('中继 %s: %s 与 %s 重叠' % (rid, a[2], b[2]))
 
-    # 4) 能源组件：占用持续到充电完成，充电未完不得再投入；编号须在册
+    # 4) 能源组件：占用持续到充电完成，充电未完不得再投入；编号须在册。
+    #    同样按出动核：充电时长由整次出动的累计能耗反算 SOC。
     n_comp, n_comp_bad = 0, 0
-    for cid, g in rt.groupby('能源组件编号'):
+    for cid, g in out.groupby('能源组件编号'):
         if str(cid)[0] != 'R':
             n_comp_bad += 1
             bad.append('能源组件编号 %s 与中继机型不符' % cid)
@@ -496,12 +544,12 @@ def check_relay(d):
             if b[0] < a[1] - TOL:
                 n_comp += 1
                 bad.append('能源组件 %s: %s 与 %s 周转冲突' % (cid, a[2], b[2]))
-    n_comp_used = rt['能源组件编号'].nunique()
+    n_comp_used = out['能源组件编号'].nunique()
     if n_comp_used > d.relay_batteries[0]:
         bad.append('能源组件用件数 %d 超过库存 %d' % (n_comp_used, d.relay_batteries[0]))
-    if rt['中继无人机编号'].nunique() > len(d.relay_uavs):
+    if out['中继无人机编号'].nunique() > len(d.relay_uavs):
         bad.append('中继无人机用机数 %d 超过在册 %d'
-                   % (rt['中继无人机编号'].nunique(), len(d.relay_uavs)))
+                   % (out['中继无人机编号'].nunique(), len(d.relay_uavs)))
 
     # 5) 结果表自洽：标为「中继」的时段必须真的落在某个架次的服务窗口内，
     #    且该架次编号可查；标为「中断」的不得又挂着架次编号。
@@ -533,16 +581,18 @@ def check_relay(d):
 
     # 三段占比不在这里复算：本表按"段"记录，段首尾取点与逐时刻统计存在半个采样
     # 步长的口径差，照段复算会与逐时刻数字差约 0.5 个百分点，两个都对却看着像
-    # 矛盾。占比的时间积分口径由下面的 check_relay_final 独立重采样复算（表 9.3），
+    # 矛盾。占比的时间积分口径由下面的 check_relay_final 独立重采样复算（表 9.5），
     # 那里才是"中断 = 0"的复算处；本表只核资源约束与表内自洽。
     metrics = [
-        ('中继架次 / 通信保障分段', '%d / %d' % (len(rt), len(cp))),
-        ('能量裕度占用比', '最大 %.3f（可用 %.2f kWh/架次）  越限 %d'
+        ('中继架次 / 出动 / 通信保障分段', '%d / %d / %d' % (len(rt), len(out), len(cp))),
+        ('能量裕度占用比', '最大 %.3f（可用 %.2f kWh/出动）  越限 %d'
          % (ratios.max(), cap, int((ratios > 1).sum()))),
+        ('出动内能耗份额求和偏差（最大）', '%.3e kWh（容差 %.1e）  不符 %d 次'
+         % (worst_share, worst_share_tol, n_out_bad)),
         ('悬停离地高度', '最大 %.1f m（上限 %.0f m）  越限 %d'
          % (agl.max(), R['max_hover_alt'], over_h)),
         ('中继无人机', '用机 %d/%d，编号不符 %d，时段重叠 %d'
-         % (rt['中继无人机编号'].nunique(), len(d.relay_uavs), n_uav_bad, n_uav)),
+         % (out['中继无人机编号'].nunique(), len(d.relay_uavs), n_uav_bad, n_uav)),
         ('能源组件', '用件 %d/%d，编号不符 %d，周转冲突 %d'
          % (n_comp_used, d.relay_batteries[0], n_comp_bad, n_comp)),
         ('结果表标注不符', '%d 段' % n_mis),
@@ -554,22 +604,22 @@ def check_relay(d):
 
 
 # ---------------------------------------------------------------------------
-# 表 9.3c 问题三运输侧资源链（错峰后）
+# 表 9.7 问题三运输侧资源链（错峰后）
 # ---------------------------------------------------------------------------
 def check_q3_transport(d):
-    """表 9.3c：**错峰之后**运输排班的资源链独立复核。
+    """表 9.7：**错峰之后**运输排班的资源链独立复核。
 
-    为什么必须单独有这一张表：表 9.1 复核的是问题二自己的排班（读
-    `q2_transport_trips.csv`），表 9.2 复核的是中继侧资源。第三问把运输架次的
+    为什么必须单独有这一张表：表 9.3 复核的是问题二自己的排班（读
+    `q2_transport_trips.csv`），表 9.4 复核的是中继侧资源。第三问把运输架次的
     开始时刻整体后移了几千秒，而**后移之后**的无人机链与共享电池链此前没有任何
-    复核覆盖——终端检查（表 9.3）只判通信分段，看不见运输资源。实测正是这个缺口
+    复核覆盖——终端检查（表 9.5）只判通信分段，看不见运输资源。实测正是这个缺口
     放过了一个不可行解：U05 同时飞 T17 与 T24，重叠 1583 s，而全部既有检查都是
     「通过」。求解器侧已按硬约束拒绝它（`q3.solve_relay` 第 8 步），本表是与之
     **相互独立**的第二道关：全部数值由结果表自行反算，不调用 q3.py 的任何函数。
 
     只读 `q3_transport_trips.csv`（错峰后时刻与资源编号）、`q3_stagger.csv`
     （推迟量）、`q2_transport_trips.csv`（错峰前对照）。共享电池的释放时刻按
-    「返航 + 按本架次能耗反算的 SOC 所需充电时长」重建，容差与表 9.1 同一口径。
+    「返航 + 按本架次能耗反算的 SOC 所需充电时长」重建，容差与表 9.3 同一口径。
     """
     trips = _inp('q3_transport_trips.csv')
     sg = _inp('q3_stagger.csv')
@@ -679,7 +729,7 @@ def check_q3_transport(d):
 
 
 # ---------------------------------------------------------------------------
-# 表 9.3  通信连续性与交付侧指标
+# 表 9.5  通信连续性与交付侧指标
 # ---------------------------------------------------------------------------
 def _q3_trips(d):
     """从 q2 结果表 + 错峰表重建**错峰后**的运输架次（路线、各区箱数、开始时刻）。"""
@@ -823,7 +873,7 @@ def phase_boundary_errors(cp, span, tol=None):
 
 
 def check_relay_final(d, dt=1.0, frac_tol=0.01):
-    """表 9.3：问题三**终点方案**的独立复核（对应 3.5/3.6/3.7 三项要求）。
+    """表 9.5：问题三**终点方案**的独立复核（对应 3.5/3.6/3.7 三项要求）。
 
     与 check_relay 的分工：那张表查的是"结果表内部自洽 + 资源硬约束"，不重算
     通信；这张表按 Δt=1 s **逐时刻重判通信状态**，是"中断 = 0"这个结论的独立
@@ -989,7 +1039,7 @@ def _stirling2(n, k):
 
 
 def check_q4(d):
-    """表 9.4：问题四任务分区与资源配置的独立复核。
+    """表 9.8：问题四任务分区与资源配置的独立复核。
 
     只读 q4 的结果表重算，**不重跑分区枚举**（那是 q4.py 的全部代价）：枚举
     规模本身改用 Stirling 数核对，其余四项全部从交付表重算——
@@ -1086,10 +1136,12 @@ def check_q4(d):
                            % (K, u, sorted(gs)))
         # 组级必要条件：含有失效区间所在服务区的组，必须至少配 1 架中继无人机。
         # 这一条取代了旧版「中继最小总需求 ≥ K」。旧版是一条**先验**（“每组自备
-        # 护航”），本算例已用交付数据证伪：S006 的三个架次（T03/T06/T15）全程直连、
-        # 在 q3_intervals.csv 里没有失效区间，它单独成组时中继需求为 0，因此
-        # K=3 的最小总需求 2 < K=3 是真实值、不是漏算。先验不能当判据——组级核对
-        # 比拿总数与 K 比更细，也更强。
+        # 护航”），本算例已用交付数据证伪：S006 的架次全程直连、在 q3_intervals.csv
+        # 里没有失效区间，它单独成组时中继需求为 0，因此 K=3 的最小总需求 2 < K=3
+        # 是真实值、不是漏算。先验不能当判据——组级核对比拿总数与 K 比更细，也更强。
+        # 注意本项**只核对这些组各自备够了中继**，不把「组数」与「库存」相比：
+        # 总量与库存的比较属于缺口核算，混在一起会从「K=3 有 3 个这样的组」直接
+        # 推出「超过库存 2」这个本项并未检验的结论。
         cnt_iv = 0
         for _, r in g.iterrows():
             gs = {s for s in str(r['服务区列表']).split(',') if s}
@@ -1191,12 +1243,12 @@ def check_q4(d):
         ('含失效区间的组数（须各配 ≥1 架中继）',
          ' '.join('K=%d %d 组' % (K, n_iv_grp[K]) for K in sorted(n_iv_grp))),
     ]
-    return rep('表 9.4   问题四分区与资源配置独立复核', not bad, bad, dict(metrics),
+    return rep('表 9.8   问题四分区与资源配置独立复核', not bad, bad, dict(metrics),
                'R 与缺口逐位相等；着色编号数 = 峰值需求；枚举行数 = Stirling 数')
 
 
 def check_q3_metrics(d):
-    """表 9.3b：问题三交付侧与能耗指标，从**结果表**独立重算后与 q3_metrics.csv 对照。
+    """表 9.6：问题三交付侧与能耗指标，从**结果表**独立重算后与 q3_metrics.csv 对照。
 
     重算只用 q3_box_delivery.csv / q3_transport_trips.csv / q3_relay_trips.csv
     与原始货箱表：加权迟到 = Σ 优先系数 × max(0, 交付时刻 − 期望送达)，
@@ -1235,10 +1287,13 @@ def check_q3_metrics(d):
             lim.append(b['deadline'])
         if lim and min(lim) - t_del < min_margin:
             min_margin, min_box = min(lim) - t_del, bid
+    # 中继侧一律先按出动去重：一行 = 一次悬停站服务，一次的能耗列在它的每一行上
+    # 都重复出现，直接对列求和会把接续出动的能耗按访问次数重复计入。
+    rout = _relay_outings(rt)
     trans_done = float(tt['返回O01时刻s'].max())
-    relay_done = float(rt['返回O01时刻s'].max()) if len(rt) else 0.0
+    relay_done = float(rout['返回O01时刻s'].max()) if len(rout) else 0.0
     e_tr = float(tt['架次能耗kWh'].sum())
-    e_rl = float(rt['架次能耗kWh'].sum()) if len(rt) else 0.0
+    e_rl = float(rout['架次能耗kWh'].sum()) if len(rout) else 0.0
     sg = _inp('q3_stagger.csv')
     n_stag = int((sg['推迟s'].astype(float) > 0).sum())
     tot_delay = float(sg['推迟s'].sum())
@@ -1250,7 +1305,7 @@ def check_q3_metrics(d):
                    if b['expect'] is not None)
     tol_tard = prio_sum * TOL_T
     tol_e_tr = tol_sum(len(tt), TOL_E)
-    tol_e_rl = tol_sum(len(rt), TOL_E)
+    tol_e_rl = tol_sum(len(rout), TOL_E)
     got_vs = [('加权迟到', w_tard, tol_tard), ('迟到箱数', float(n_late), 0),
               ('最长迟到', max_late, TOL_T),
               ('最小硬时限余量', (0.0 if min_margin == float('inf') else min_margin), TOL_T),
@@ -1278,7 +1333,7 @@ def check_q3_metrics(d):
     return rep('T9.3b 问题三交付侧与能耗指标', not bad, bad, dict(metrics),
                '单值时刻 %.1e s；加权迟到 %.1e（%d 箱优先系数之和 × 半末位）；'
                '能耗 %.1e×项数（%d/%d 项）；计数严格相等'
-               % (TOL_T, tol_tard, int(round(prio_sum)), TOL_E, len(tt), len(rt)))
+               % (TOL_T, tol_tard, int(round(prio_sum)), TOL_E, len(tt), len(rout)))
 
 
 # ---------------------------------------------------------------------------
@@ -1485,14 +1540,14 @@ def check_bilinear_bound(d, n_probe=20000, seed=0):
 # 汇总（F06）
 # ---------------------------------------------------------------------------
 CHECKS = [
-    ('表 9.0   问题一推荐组批方案独立复核', check_q1),
-    ('表 9.0b  问题一集合划分 ILP 交叉复核', check_q1_ilp),
-    ('表 9.1   问题二硬约束独立复核', check_hard_constraints),
-    ('表 9.2   问题三中继方案独立复核', check_relay),
-    ('表 9.3   通信连续性独立复核（Δt=1 s 逐时刻重判）', check_relay_final),
-    ('表 9.3b  问题三交付侧与能耗指标独立重算', check_q3_metrics),
-    ('表 9.3c  错峰后运输侧资源链独立复核', check_q3_transport),
-    ('表 9.4   问题四分区与资源配置独立复核', check_q4),
+    ('表 9.1   问题一推荐组批方案独立复核', check_q1),
+    ('表 9.2  问题一集合划分 ILP 交叉复核', check_q1_ilp),
+    ('表 9.3   问题二硬约束独立复核', check_hard_constraints),
+    ('表 9.4   问题三中继方案独立复核', check_relay),
+    ('表 9.5   通信连续性独立复核（Δt=1 s 逐时刻重判）', check_relay_final),
+    ('表 9.6  问题三交付侧与能耗指标独立重算', check_q3_metrics),
+    ('表 9.7  错峰后运输侧资源链独立复核', check_q3_transport),
+    ('表 9.8   问题四分区与资源配置独立复核', check_q4),
     ('9.4 节   DEM 口径与离散化误差', check_dem_caliber),
     ('9.4 节   视线遮挡判定的步长敏感性', check_occlusion_step),
     ('9.4 节   双线性插值自洽性', check_bilinear_bound),

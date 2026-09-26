@@ -692,6 +692,7 @@ def _relay_probe(d, st, order, dispatch, rank_bonus):
     「架次数 / 完工 / 能耗 / 加权时延」四项已在候选筛选时按逐位相等锁死，不重复。
     """
     import q3                                        # 延迟导入：q3 模块级 import q2
+    import q3_chain
     asg = q2.schedule(d, st, order=order, dispatch=dispatch, rank_bonus=rank_bonus)
     # 与 q3.recommended() 同口径：按开始时刻重排后重编 trip_idx
     a = sorted(asg, key=lambda x: x['start'])
@@ -704,13 +705,17 @@ def _relay_probe(d, st, order, dispatch, rank_bonus):
         return None, f'第三问不可行：{res["reason"]}'
     frac, _segs, gaps = q3.audit(d, res['assignment'], res['relays'], res['cands'])
     done = max([x['return_t'] for x in res['relays']] or [0.0])
+    # 中继能耗与架次数按**出动**核（一排一行 = 一次悬停站服务，出动级的 E 与时刻
+    # 在该出动的每一行上重复出现；接续把多次服务叠在一次出动里，逐行求和会按访问
+    # 次数重复计入，逐行计数会把接续当成额外架次）。
+    n_relay, relay_E, _n_chain = q3_chain.outing_stats(res['relays'])
     key = (len(res['uncovered']), round(float(frac['gap']), 12),
            round(float(sum(res['deltas'])), 6), round(done, 6),
-           round(float(sum(x['E'] for x in res['relays'])), 9))
+           round(float(relay_E), 9))
     return key, dict(gap=float(frac['gap']), n_gap_pts=len(gaps),
                      delay=float(sum(res['deltas'])), joint_done=float(done),
-                     relay_E=float(sum(x['E'] for x in res['relays'])),
-                     n_relays=len(res['relays']), n_skipped=len(res['skipped']))
+                     relay_E=float(relay_E),
+                     n_relays=n_relay, n_skipped=len(res['skipped']))
 
 
 def relay_feasible_order(d, st, asg, order, m, dispatch='balanced',

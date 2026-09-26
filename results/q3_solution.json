@@ -6,11 +6,7 @@
  },
  "component_ids": [
   "RC1",
-  "RC2",
-  "RC3",
-  "RC4",
-  "RC5",
-  "RC6"
+  "RC2"
  ],
  "input_hashes": {
   "数据/无人机应急物资运输基础数据/中继无人机数据.xlsx": "be52643ff29419233e6a141dca03a04160a8af551cab36d8c49b51bb836bea04",
@@ -33,23 +29,23 @@
  },
  "intervals": [
   {
-   "end": 3479.538151463542,
+   "end": 1761.2921694427675,
    "interval_id": "G01",
-   "relay_trip_id": "R03",
-   "start": 2533.415858422691,
+   "relay_trip_id": "R04",
+   "start": 815.1698764019172,
    "trip_id": "T04"
   },
   {
-   "end": 1232.7897940125135,
+   "end": 1562.9996805712703,
    "interval_id": "G02",
    "relay_trip_id": "R01",
-   "start": 706.782584314816,
+   "start": 751.5044592187926,
    "trip_id": "T05"
   },
   {
    "end": 1235.0201831342204,
    "interval_id": "G03",
-   "relay_trip_id": "R02",
+   "relay_trip_id": "R04",
    "start": 813.0737240655639,
    "trip_id": "T06"
   },
@@ -68,252 +64,275 @@
    "trip_id": "T09"
   },
   {
-   "end": 2955.3623174913478,
+   "end": 2551.661932120165,
    "interval_id": "G06",
-   "relay_trip_id": "R03",
-   "start": 2533.415858422691,
+   "relay_trip_id": "R05",
+   "start": 2129.7154730515085,
    "trip_id": "T11"
   },
   {
    "end": 3399.8809213117856,
    "interval_id": "G07",
-   "relay_trip_id": "R01",
+   "relay_trip_id": "R02",
    "start": 2973.856705247181,
    "trip_id": "T12"
   },
   {
-   "end": 3123.607319722168,
+   "end": 3308.0874909392587,
    "interval_id": "G08",
-   "relay_trip_id": "R01",
-   "start": 2312.11209836969,
+   "relay_trip_id": "R06",
+   "start": 2782.0802812415614,
    "trip_id": "T13"
   },
   {
-   "end": 7057.516497360123,
+   "end": 4139.22317200339,
    "interval_id": "G09",
-   "relay_trip_id": "R04",
-   "start": 5977.93476662996,
+   "relay_trip_id": "R06",
+   "start": 3059.6414412732265,
    "trip_id": "T14"
   },
   {
    "end": 3654.998567725195,
    "interval_id": "G10",
-   "relay_trip_id": "R01",
+   "relay_trip_id": "R02",
    "start": 3032.6427241763054,
    "trip_id": "T15"
   },
   {
    "end": 3916.9548891368636,
    "interval_id": "G11",
-   "relay_trip_id": "R03",
+   "relay_trip_id": "R06",
    "start": 3056.224031024056,
    "trip_id": "T16"
   },
   {
-   "end": 8854.871591820032,
+   "end": 4102.501199132817,
    "interval_id": "G12",
    "relay_trip_id": "R06",
-   "start": 8265.18919983259,
+   "start": 3511.583059860914,
    "trip_id": "T17"
   },
   {
-   "end": 5948.110627803977,
+   "end": 4829.73073683943,
    "interval_id": "G13",
-   "relay_trip_id": "R05",
-   "start": 5297.917416524278,
+   "relay_trip_id": "R03",
+   "start": 4179.537525559733,
    "trip_id": "T18"
   },
   {
-   "end": 5447.395997621892,
+   "end": 4768.223351132488,
    "interval_id": "G14",
-   "relay_trip_id": "R04",
-   "start": 5055.4495385532355,
+   "relay_trip_id": "R07",
+   "start": 4376.276892063832,
    "trip_id": "T19"
   },
   {
-   "end": 5887.599808511722,
+   "end": 5237.4868180457415,
    "interval_id": "G15",
-   "relay_trip_id": "R05",
-   "start": 5297.917416524279,
+   "relay_trip_id": "R03",
+   "start": 4647.804426058299,
    "trip_id": "T20"
   },
   {
-   "end": 6152.220572302794,
+   "end": 6093.038562361089,
    "interval_id": "G16",
-   "relay_trip_id": "R05",
-   "start": 5297.917416524279,
+   "relay_trip_id": "R03",
+   "start": 5238.735406582575,
    "trip_id": "T21"
   },
   {
-   "end": 5954.8503045017105,
+   "end": 5863.618956285911,
    "interval_id": "G17",
-   "relay_trip_id": "R04",
-   "start": 5055.4495385532355,
+   "relay_trip_id": "R07",
+   "start": 4964.218190337436,
    "trip_id": "T22"
   },
   {
-   "end": 9193.640453457041,
+   "end": 5970.164790749749,
    "interval_id": "G18",
-   "relay_trip_id": "R07",
-   "start": 8575.5844830443,
+   "relay_trip_id": "R03",
+   "start": 5380.482398762307,
    "trip_id": "T23"
   },
   {
-   "end": 6987.208000203101,
+   "end": 6096.380571613068,
    "interval_id": "G19",
-   "relay_trip_id": "R04",
-   "start": 6396.289860931196,
+   "relay_trip_id": "R03",
+   "start": 5478.324601200327,
    "trip_id": "T24"
   }
  ],
  "metrics": {
-  "direct": 0.7167366137810119,
+  "direct": 0.7167366137810155,
   "gap": 0.0,
-  "joint_done": 9749.460021527473,
-  "joint_energy_kwh": 73.80935833855979,
-  "makespan": 9594.374970135592,
-  "max_late_s": 1470.6950347016354,
+  "joint_done": 6641.721571664952,
+  "joint_energy_kwh": 72.99270545006804,
+  "makespan": 6506.092615281044,
+  "max_late_s": 0.0,
   "min_hard_margin_box": "S002-WAT-01",
   "min_hard_margin_s": 5.353270632430849,
-  "n_late_boxes": 1.0,
-  "n_relays": 7.0,
-  "n_staggered": 11.0,
-  "n_stations": 5.0,
-  "relay": 0.28326338621898817,
-  "relay_done_s": 9749.460021527473,
-  "relay_energy_kwh": 4.4933763777840445,
+  "n_chain": 5.0,
+  "n_late_boxes": 0.0,
+  "n_relay_visits": 7.0,
+  "n_relays": 2.0,
+  "n_staggered": 3.0,
+  "n_stations": 6.0,
+  "relay": 0.28326338621898456,
+  "relay_done_s": 6641.721571664952,
+  "relay_energy_kwh": 3.6767234892922955,
   "skipped": 0.0,
-  "total_delay_s": 17291.51282079777,
-  "total_time": 44595.78973837226,
-  "transport_done_s": 9594.374970135592,
+  "total_delay_s": 708.8071020256971,
+  "total_time": 44595.78973837217,
+  "transport_done_s": 6506.092615281044,
   "transport_energy_kwh": 69.31598196077574,
   "uncovered": 0.0,
-  "weight_tardiness": 14706.950347016354
+  "weight_tardiness": 0.0
  },
  "relay_trips": [
   {
    "component_id": "RC1",
-   "energy_kwh": 1.123258173730017,
-   "hover_agl_m": 190.0,
+   "energy_kwh": 1.8955476807870255,
+   "hover_agl_m": 90.0,
    "interval_ids": [
     "G02",
     "G04",
-    "G05",
+    "G05"
+   ],
+   "late": false,
+   "link_done": 751.5044592187926,
+   "outing_id": "D01",
+   "relay_trip_id": "R01",
+   "relay_uav_id": "R01",
+   "return_time": 6641.721571664952,
+   "seq_in_outing": 1,
+   "service_end": 2344.3407882784454,
+   "start": 95.88880565285064,
+   "station_id": "S05",
+   "visit_energy_kwh": 0.632818431260975
+  },
+  {
+   "component_id": "RC1",
+   "energy_kwh": 1.8955476807870255,
+   "hover_agl_m": 185.0,
+   "interval_ids": [
     "G07",
-    "G08",
     "G10"
    ],
    "late": false,
-   "link_done": 706.782584314816,
-   "relay_trip_id": "R01",
+   "link_done": 2450.424382065066,
+   "outing_id": "D01",
+   "relay_trip_id": "R02",
    "relay_uav_id": "R01",
-   "return_time": 4094.335288513597,
-   "service_end": 3654.9985677251943,
-   "start": 96.5912607758886,
-   "station_id": "S05"
+   "return_time": 6641.721571664952,
+   "seq_in_outing": 2,
+   "service_end": 3654.998567725195,
+   "start": 95.88880565285064,
+   "station_id": "S06",
+   "visit_energy_kwh": 0.3926639237963289
+  },
+  {
+   "component_id": "RC1",
+   "energy_kwh": 1.8955476807870255,
+   "hover_agl_m": 185.0,
+   "interval_ids": [
+    "G13",
+    "G15",
+    "G16",
+    "G18",
+    "G19"
+   ],
+   "late": false,
+   "link_done": 4179.537525559733,
+   "outing_id": "D01",
+   "relay_trip_id": "R03",
+   "relay_uav_id": "R01",
+   "return_time": 6641.721571664952,
+   "seq_in_outing": 3,
+   "service_end": 6096.380571613068,
+   "start": 95.88880565285064,
+   "station_id": "S04",
+   "visit_energy_kwh": 0.8700653257297216
   },
   {
    "component_id": "RC2",
-   "energy_kwh": 0.3729324192826256,
-   "hover_agl_m": 100.0,
+   "energy_kwh": 1.7811758085052702,
+   "hover_agl_m": 150.0,
    "interval_ids": [
+    "G01",
     "G03"
    ],
    "late": false,
    "link_done": 813.0737240655639,
-   "relay_trip_id": "R02",
-   "relay_uav_id": "R02",
-   "return_time": 1713.7452868636653,
-   "service_end": 1235.0201831342204,
-   "start": 151.959474025926,
-   "station_id": "S01"
-  },
-  {
-   "component_id": "RC3",
-   "energy_kwh": 0.5934447355241178,
-   "hover_agl_m": 300.0,
-   "interval_ids": [
-    "G01",
-    "G06",
-    "G11"
-   ],
-   "late": false,
-   "link_done": 2533.415858422691,
-   "relay_trip_id": "R03",
-   "relay_uav_id": "R02",
-   "return_time": 4258.574534569548,
-   "service_end": 3916.9548891368636,
-   "start": 2013.7452868636656,
-   "station_id": "S02"
-  },
-  {
-   "component_id": "RC4",
-   "energy_kwh": 0.8557470164248631,
-   "hover_agl_m": 100.0,
-   "interval_ids": [
-    "G09",
-    "G14",
-    "G17",
-    "G19"
-   ],
-   "late": false,
-   "link_done": 5055.4495385532355,
+   "outing_id": "D02",
    "relay_trip_id": "R04",
-   "relay_uav_id": "R01",
-   "return_time": 7536.241601089568,
-   "service_end": 7057.516497360123,
-   "start": 4394.335288513597,
-   "station_id": "S01"
-  },
-  {
-   "component_id": "RC5",
-   "energy_kwh": 0.576730075906499,
-   "hover_agl_m": 200.0,
-   "interval_ids": [
-    "G13",
-    "G15",
-    "G16"
-   ],
-   "late": false,
-   "link_done": 5297.917416524279,
-   "relay_trip_id": "R05",
    "relay_uav_id": "R02",
-   "return_time": 6708.040140373225,
-   "service_end": 6152.220572302794,
-   "start": 4558.574534569548,
-   "station_id": "S03"
-  },
-  {
-   "component_id": "RC6",
-   "energy_kwh": 0.4667205209822981,
-   "hover_agl_m": 300.0,
-   "interval_ids": [
-    "G12"
-   ],
-   "late": false,
-   "link_done": 8265.18919983259,
-   "relay_trip_id": "R06",
-   "relay_uav_id": "R02",
-   "return_time": 9385.788590464594,
-   "service_end": 8854.871591820032,
-   "start": 7559.645154437059,
-   "station_id": "S04"
+   "return_time": 6365.579228402538,
+   "seq_in_outing": 1,
+   "service_end": 1761.2921694427675,
+   "start": 108.95171177844486,
+   "station_id": "S03",
+   "visit_energy_kwh": 0.45258841127357263
   },
   {
    "component_id": "RC2",
-   "energy_kwh": 0.5045434359336238,
-   "hover_agl_m": 200.0,
+   "energy_kwh": 1.7811758085052702,
+   "hover_agl_m": 125.0,
    "interval_ids": [
-    "G18"
+    "G06"
    ],
    "late": false,
-   "link_done": 8575.5844830443,
+   "link_done": 2029.244080551962,
+   "outing_id": "D02",
+   "relay_trip_id": "R05",
+   "relay_uav_id": "R02",
+   "return_time": 6365.579228402538,
+   "seq_in_outing": 2,
+   "service_end": 2551.661932120165,
+   "start": 108.95171177844486,
+   "station_id": "S01",
+   "visit_energy_kwh": 0.21758669861421343
+  },
+  {
+   "component_id": "RC2",
+   "energy_kwh": 1.7811758085052702,
+   "hover_agl_m": 65.0,
+   "interval_ids": [
+    "G08",
+    "G09",
+    "G11",
+    "G12"
+   ],
+   "late": false,
+   "link_done": 2782.0802812415614,
+   "outing_id": "D02",
+   "relay_trip_id": "R06",
+   "relay_uav_id": "R02",
+   "return_time": 6365.579228402538,
+   "seq_in_outing": 3,
+   "service_end": 4139.22317200339,
+   "start": 108.95171177844486,
+   "station_id": "S02",
+   "visit_energy_kwh": 0.4794256387274551
+  },
+  {
+   "component_id": "RC2",
+   "energy_kwh": 1.7811758085052702,
+   "hover_agl_m": 125.0,
+   "interval_ids": [
+    "G14",
+    "G17"
+   ],
+   "late": false,
+   "link_done": 4376.276892063832,
+   "outing_id": "D02",
    "relay_trip_id": "R07",
-   "relay_uav_id": "R01",
-   "return_time": 9749.460021527473,
-   "service_end": 9193.640453457041,
-   "start": 7836.241601089569,
-   "station_id": "S03"
+   "relay_uav_id": "R02",
+   "return_time": 6365.579228402538,
+   "seq_in_outing": 4,
+   "service_end": 5863.618956285911,
+   "start": 108.95171177844486,
+   "station_id": "S01",
+   "visit_energy_kwh": 0.6315750598900292
   }
  ],
  "relay_uav_ids": [
@@ -322,31 +341,34 @@
  ],
  "schema_version": "1.0",
  "seed": 0,
- "solution_id": "q3-d3b2d43b592c",
+ "solution_id": "q3-a30ebdaec554",
  "solver_hashes": {
   "code/core.py": "cf7a666e5a805e5960f9ca8a4c22dd0d41a70fdf01259dc7d9770f782204cb56",
   "code/q2.py": "c35ab8633e711a95554ba04351a15af2d4889a44b121a03e3ea5f61ca1fc0124",
-  "code/q2_v2.py": "3bdbe14b196dbc12b15dcfdbb4c7e371e1f3ae0e64b1633eff334ae4712591f0",
-  "code/q3.py": "ccb7aeea29432c556be7b2582b055d7e90d7cc3fc8a475a7df1cd16092bfb6fd",
-  "code/q3_v2.py": "ec6965b6c71c2552a490ed6fe3084ca6b36ff584ce2b4672838363e0edbca352",
-  "code/solution_io.py": "d9008194428aab0a99e52559d499edd047456547e5f453ce2552012a5b698fcb"
+  "code/q2_v2.py": "8c6f91ffeb9e710201ddc6d97770059018e80dce6451fc15f4c4728def0c5ddd",
+  "code/q3.py": "b95cfbc09d0590b4516707d5980c36d584f51c013d80e56957d113547fe8927a",
+  "code/q3_chain.py": "0cad595f25781b8fd9930e8242c9c424ba9c83b6e5da0f28f277c3f87fe67206",
+  "code/q3_v2.py": "5e992492b2e1e455942c387272fda4eadecc273d83ed9c7958858fdc536fd4f9",
+  "code/solution_io.py": "3242f8fbaad8147b51fd3826b8ffaf826c3abf9470e617f03a7a0f3d3b332829"
  },
  "solver_text_hashes": {
   "code/core.py": "06ad8d19cec8527a794e3801cdd0426604d2743d8c8bceea96d13d64825adba6",
   "code/q2.py": "269741e6875127bc4d85f3ff0ef266d61f59eabed21c8359e713c63844004445",
-  "code/q2_v2.py": "3bdbe14b196dbc12b15dcfdbb4c7e371e1f3ae0e64b1633eff334ae4712591f0",
-  "code/q3.py": "ccb7aeea29432c556be7b2582b055d7e90d7cc3fc8a475a7df1cd16092bfb6fd",
-  "code/q3_v2.py": "ec6965b6c71c2552a490ed6fe3084ca6b36ff584ce2b4672838363e0edbca352",
-  "code/solution_io.py": "d9008194428aab0a99e52559d499edd047456547e5f453ce2552012a5b698fcb"
+  "code/q2_v2.py": "8c6f91ffeb9e710201ddc6d97770059018e80dce6451fc15f4c4728def0c5ddd",
+  "code/q3.py": "b95cfbc09d0590b4516707d5980c36d584f51c013d80e56957d113547fe8927a",
+  "code/q3_chain.py": "0cad595f25781b8fd9930e8242c9c424ba9c83b6e5da0f28f277c3f87fe67206",
+  "code/q3_v2.py": "5e992492b2e1e455942c387272fda4eadecc273d83ed9c7958858fdc536fd4f9",
+  "code/solution_io.py": "3242f8fbaad8147b51fd3826b8ffaf826c3abf9470e617f03a7a0f3d3b332829"
  },
- "source_solution_id": "q2-bf7e48c4bc52",
+ "source_solution_id": "q2-258089df510b",
  "stage": "q3",
  "station_ids": [
   "S01",
   "S02",
   "S03",
   "S04",
-  "S05"
+  "S05",
+  "S06"
  ],
  "transport_trips": [
   {
@@ -443,20 +465,20 @@
     ]
    },
    "deliver_abs": {
-    "S002-FOD-01": 3209.0629088737805,
-    "S002-FOD-02": 3209.0629088737805,
-    "S002-HYG-01": 3209.0629088737805,
-    "S002-WAT-02": 3209.0629088737805,
-    "S002-WAT-03": 3209.0629088737805,
-    "S002-WAT-04": 3209.0629088737805
+    "S002-FOD-01": 1490.8169268530064,
+    "S002-FOD-02": 1490.8169268530064,
+    "S002-HYG-01": 1490.8169268530064,
+    "S002-WAT-02": 1490.8169268530064,
+    "S002-WAT-03": 1490.8169268530064,
+    "S002-WAT-04": 1490.8169268530064
    },
    "duration": 2114.813853706013,
    "energy_kwh": 6.125102401270151,
-   "return_time": 3833.0598357267872,
+   "return_time": 2114.813853706013,
    "route": [
     "S002"
    ],
-   "start": 1718.245982020774,
+   "start": 0.0,
    "trip_id": "T04",
    "type": "C",
    "uav": "U08"
@@ -465,22 +487,22 @@
    "base_start": 0.0,
    "battery": "BB1",
    "box_ids_by_service": {
-    "S009": [
-     "S009-WAT-01",
-     "S009-MED-01",
-     "S009-FOD-01"
+    "S012": [
+     "S012-WAT-01",
+     "S012-MED-01",
+     "S012-FOD-01"
     ]
    },
    "deliver_abs": {
-    "S009-FOD-01": 1091.8938195754486,
-    "S009-MED-01": 1091.8938195754486,
-    "S009-WAT-01": 1091.8938195754486
+    "S012-FOD-01": 1282.161748646659,
+    "S012-MED-01": 1282.161748646659,
+    "S012-WAT-01": 1282.161748646659
    },
-   "duration": 1560.6076391508973,
-   "energy_kwh": 2.1019729584179307,
-   "return_time": 1560.6076391508973,
+   "duration": 1944.463497293318,
+   "energy_kwh": 2.764444749863512,
+   "return_time": 1944.463497293318,
    "route": [
-    "S009"
+    "S012"
    ],
    "start": 0.0,
    "trip_id": "T05",
@@ -626,16 +648,16 @@
     ]
    },
    "deliver_abs": {
-    "S007-FOD-01": 2854.50010378547,
-    "S007-WAT-02": 2854.50010378547
+    "S007-FOD-01": 2450.7997184142873,
+    "S007-WAT-02": 2450.7997184142873
    },
    "duration": 1713.0359388566853,
    "energy_kwh": 1.9658031573133194,
-   "return_time": 3433.3780732138125,
+   "return_time": 3029.67768784263,
    "route": [
     "S007"
    ],
-   "start": 1720.3421343571272,
+   "start": 1316.6417489859446,
    "trip_id": "T11",
    "type": "A",
    "uav": "U03"
@@ -678,27 +700,27 @@
    "uav": "U07"
   },
   {
-   "base_start": 1560.6076391508973,
+   "base_start": 1944.463497293318,
    "battery": "BB3",
    "box_ids_by_service": {
-    "S012": [
-     "S012-WAT-01",
-     "S012-MED-01",
-     "S012-FOD-01"
+    "S009": [
+     "S009-WAT-01",
+     "S009-MED-01",
+     "S009-FOD-01"
     ]
    },
    "deliver_abs": {
-    "S012-FOD-01": 2842.769387797556,
-    "S012-MED-01": 2842.769387797556,
-    "S012-WAT-01": 2842.769387797556
+    "S009-FOD-01": 3167.1915165021933,
+    "S009-MED-01": 3167.1915165021933,
+    "S009-WAT-01": 3167.1915165021933
    },
-   "duration": 1944.463497293318,
-   "energy_kwh": 2.764444749863512,
-   "return_time": 3505.071136444215,
+   "duration": 1560.6076391508973,
+   "energy_kwh": 2.1019729584179307,
+   "return_time": 3635.905336077642,
    "route": [
-    "S012"
+    "S009"
    ],
-   "start": 1560.6076391508973,
+   "start": 2075.2976969267447,
    "trip_id": "T13",
    "type": "B",
    "uav": "U06"
@@ -718,21 +740,21 @@
     ]
    },
    "deliver_abs": {
-    "S003-FOD-01": 6744.890838904221,
-    "S003-FOD-02": 6744.890838904221,
-    "S003-HYG-01": 6744.890838904221,
-    "S003-MED-01": 6744.890838904221,
-    "S003-WAT-02": 6744.890838904221,
-    "S003-WAT-03": 6744.890838904221,
-    "S003-WAT-04": 6744.890838904221
+    "S003-FOD-01": 3826.597513547488,
+    "S003-FOD-02": 3826.597513547488,
+    "S003-HYG-01": 3826.597513547488,
+    "S003-MED-01": 3826.597513547488,
+    "S003-WAT-02": 3826.597513547488,
+    "S003-WAT-03": 3826.597513547488,
+    "S003-WAT-04": 3826.597513547488
    },
    "duration": 2502.6473196829493,
    "energy_kwh": 6.327428339890778,
-   "return_time": 7535.754498745696,
+   "return_time": 4617.461173388962,
    "route": [
     "S003"
    ],
-   "start": 5033.107179062747,
+   "start": 2114.813853706013,
    "trip_id": "T14",
    "type": "C",
    "uav": "U08"
@@ -789,22 +811,24 @@
    "base_start": 2711.95668108029,
    "battery": "BB0",
    "box_ids_by_service": {
-    "S004": [
-     "S004-WAT-03",
-     "S004-HYG-01"
+    "S015": [
+     "S015-WAT-01",
+     "S015-FOD-01",
+     "S015-MED-01"
     ]
    },
    "deliver_abs": {
-    "S004-HYG-01": 8670.695034701635,
-    "S004-WAT-03": 8670.695034701635
+    "S015-FOD-01": 3930.2854380092353,
+    "S015-MED-01": 3930.2854380092353,
+    "S015-WAT-01": 3930.2854380092353
    },
-   "duration": 1925.2147440530132,
-   "energy_kwh": 2.677141048042569,
-   "return_time": 9351.655740061477,
+   "duration": 1829.7775138578909,
+   "energy_kwh": 2.311387042682905,
+   "return_time": 4541.734194938181,
    "route": [
-    "S004"
+    "S015"
    ],
-   "start": 7426.440996008463,
+   "start": 2711.95668108029,
    "trip_id": "T17",
    "type": "B",
    "uav": "U05"
@@ -819,16 +843,16 @@
     ]
    },
    "deliver_abs": {
-    "S004-FOD-01": 5733.678661039453,
-    "S004-WAT-02": 5733.678661039453
+    "S004-FOD-01": 4615.298770074906,
+    "S004-WAT-02": 4615.298770074906
    },
    "duration": 2183.2640691043525,
    "energy_kwh": 3.2016682571923702,
-   "return_time": 6543.664028924963,
+   "return_time": 5425.284137960416,
    "route": [
     "S004"
    ],
-   "start": 4360.39995982061,
+   "start": 3242.020068856064,
    "trip_id": "T18",
    "type": "A",
    "uav": "U01"
@@ -842,21 +866,21 @@
     ]
    },
    "deliver_abs": {
-    "S007-HYG-01": 5346.533783916014
+    "S007-HYG-01": 4667.36113742661
    },
    "duration": 1653.0359388566853,
    "energy_kwh": 1.8013132418581044,
-   "return_time": 5925.411753344357,
+   "return_time": 5246.239106854953,
    "route": [
     "S007"
    ],
-   "start": 4272.375814487672,
+   "start": 3593.203167998268,
    "trip_id": "T19",
    "type": "A",
    "uav": "U03"
   },
   {
-   "base_start": 3505.071136444215,
+   "base_start": 3809.056222234173,
    "battery": "BB1",
    "box_ids_by_service": {
     "S004": [
@@ -865,16 +889,16 @@
     ]
    },
    "deliver_abs": {
-    "S004-MED-01": 5703.423251393326,
-    "S004-WAT-01": 5703.423251393326
+    "S004-MED-01": 5053.3102609273465,
+    "S004-WAT-01": 5053.3102609273465
    },
    "duration": 1925.2147440530132,
    "energy_kwh": 2.584987792573025,
-   "return_time": 6384.383956753166,
+   "return_time": 5734.270966287187,
    "route": [
     "S004"
    ],
-   "start": 4459.1692127001525,
+   "start": 3809.056222234173,
    "trip_id": "T20",
    "type": "B",
    "uav": "U06"
@@ -897,23 +921,23 @@
     ]
    },
    "deliver_abs": {
-    "S008-FOD-01": 5866.295441805051,
-    "S008-HYG-01": 5866.295441805051,
-    "S008-MED-01": 5866.295441805051,
-    "S008-WAT-01": 5866.295441805051,
-    "S008-WAT-02": 5866.295441805051,
-    "S011-FOD-01": 4998.595524149589,
-    "S011-MED-01": 4998.595524149589,
-    "S011-WAT-01": 4998.595524149589
+    "S008-FOD-01": 5807.113431863347,
+    "S008-HYG-01": 5807.113431863347,
+    "S008-MED-01": 5807.113431863347,
+    "S008-WAT-01": 5807.113431863347,
+    "S008-WAT-02": 5807.113431863347,
+    "S011-FOD-01": 4939.413514207885,
+    "S011-MED-01": 4939.413514207885,
+    "S011-WAT-01": 4939.413514207885
    },
    "duration": 2691.1301164368874,
    "energy_kwh": 6.3733472487328635,
-   "return_time": 6565.274625222748,
+   "return_time": 6506.092615281044,
    "route": [
     "S011",
     "S008"
    ],
-   "start": 3874.144508785861,
+   "start": 3814.9624988441565,
    "trip_id": "T21",
    "type": "C",
    "uav": "U07"
@@ -927,18 +951,42 @@
     ]
    },
    "deliver_abs": {
-    "S003-WAT-01": 5602.593392800259
+    "S003-WAT-01": 5511.362044584459
    },
    "duration": 2203.324241359872,
    "energy_kwh": 2.933014926731873,
-   "return_time": 6456.282180146862,
+   "return_time": 6365.050831931062,
    "route": [
     "S003"
    ],
-   "start": 4252.95793878699,
+   "start": 4161.72659057119,
    "trip_id": "T22",
    "type": "A",
    "uav": "U02"
+  },
+  {
+   "base_start": 4541.734194938181,
+   "battery": "BB2",
+   "box_ids_by_service": {
+    "S004": [
+     "S004-WAT-03",
+     "S004-HYG-01"
+    ]
+   },
+   "deliver_abs": {
+    "S004-HYG-01": 5785.988233631354,
+    "S004-WAT-03": 5785.988233631354
+   },
+   "duration": 1925.2147440530132,
+   "energy_kwh": 2.677141048042569,
+   "return_time": 6466.948938991194,
+   "route": [
+    "S004"
+   ],
+   "start": 4541.734194938181,
+   "trip_id": "T23",
+   "type": "B",
+   "uav": "U05"
   },
   {
    "base_start": 4617.461173388962,
@@ -954,49 +1002,23 @@
     ]
    },
    "deliver_abs": {
-    "S005-FOD-01": 9089.183012684263,
-    "S005-HYG-01": 9089.183012684263,
-    "S005-MED-01": 9089.183012684263,
-    "S005-WAT-01": 9089.183012684263,
-    "S005-WAT-02": 9089.183012684263,
-    "S005-WAT-03": 9089.183012684263
+    "S005-FOD-01": 5991.9231308402905,
+    "S005-HYG-01": 5991.9231308402905,
+    "S005-MED-01": 5991.9231308402905,
+    "S005-WAT-01": 5991.9231308402905,
+    "S005-WAT-02": 5991.9231308402905,
+    "S005-WAT-03": 5991.9231308402905
    },
    "duration": 1879.6539149026562,
    "energy_kwh": 4.236459399190354,
-   "return_time": 9594.374970135592,
+   "return_time": 6497.115088291619,
    "route": [
     "S005"
    ],
-   "start": 7714.721055232935,
-   "trip_id": "T23",
+   "start": 4617.461173388962,
+   "trip_id": "T24",
    "type": "C",
    "uav": "U08"
-  },
-  {
-   "base_start": 4637.171425133303,
-   "battery": "BB2",
-   "box_ids_by_service": {
-    "S015": [
-     "S015-WAT-01",
-     "S015-FOD-01",
-     "S015-MED-01"
-    ]
-   },
-   "deliver_abs": {
-    "S015-FOD-01": 6814.992239079518,
-    "S015-MED-01": 6814.992239079518,
-    "S015-WAT-01": 6814.992239079518
-   },
-   "duration": 1829.7775138578909,
-   "energy_kwh": 2.311387042682905,
-   "return_time": 7426.440996008463,
-   "route": [
-    "S015"
-   ],
-   "start": 5596.663482150572,
-   "trip_id": "T24",
-   "type": "B",
-   "uav": "U05"
   }
  ]
 }

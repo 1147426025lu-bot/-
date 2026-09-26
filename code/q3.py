@@ -41,6 +41,8 @@ from core import (T_DEC, E_DEC, load_data, ll_to_xy, segment_geometry, segment_t
                   relay_flight_time, relay_flight_energy, relay_hover_energy, charge_time,
                   box_index, weighted_tardiness, shifted_tardiness)
 from q2 import precompute_geometry, recommended, resource_usage
+import q3_chain
+from q3_chain import schedule_relays as _schedule_relays_impl
 from solution_io import (build_q3_solution, save_solution, load_solution,
                          inherit_trip_ids, check_foreign_keys, input_hashes,
                          solver_hashes, solver_hashes_text, Q2_SOLVER_FILES)
@@ -1453,55 +1455,23 @@ def merge_jobs(intervals, sel, gap=MERGE_GAP, max_job=MAX_JOB):
     return jobs
 
 
-def schedule_relays(d, jobs, cands, verbose=False):
-    """
-    中继排班：每站去程时间已知，按失效区间起点顺序派发。保留「建链完成晚于
-    区间结束即弃飞」规则——空飞同样占用中继与能源组件，会把后续本可按时到达
-    的架次一起顶迟到。
-    """
-    rt = d.relay_type
-    # 中继机清单从数据读（`d.relay_uavs`），不写死 ['R01','R02']：数据一旦增减
-    # 机数，写死的版本会静默按 2 架排班，而报出的机队规模仍是数据里那个数。
-    if not d.relay_uavs:
-        raise RuntimeError('数据中继无人机清单为空，无法排班')
-    relays = [dict(id=u['id'], free_at=0.0) for u in d.relay_uavs]
-    comps = [dict(id=f'RC{k+1}', ready_at=0.0) for k in range(d.relay_batteries[0])]
-    out_flight = {}
-    for ci in {j['ci'] for j in jobs}:
-        st = _as_st(cands[ci])
-        out_flight[ci] = relay_trip_cost(d, st, 0.0)['t_flight_out']
-    trips, skipped = [], []
-    for job in jobs:
-        ci = job['ci']
-        st = cands[ci]
-        tf = out_flight[ci]
+# 中继排班是否允许「站与站之间直接转场」（阶段 13）。`False` 时退回「每次出动只
+# 服务一个站、必返 O01」的旧规则，且走的是 `q3_chain` 里与旧实现同一段算术的分支，
+# 因此与改动前的解逐位一致——这是「旧解仍可复现」的开关，也是一组回归用例。
+ALLOW_CHAIN_RELAY = True
 
-        def arrive_time(r):
-            return r['free_at'] + rt['prep'] + rt['link'] + tf
 
-        r = min(relays, key=arrive_time)
-        c = min(comps, key=lambda x: x['ready_at'])
-        t_depart = job['t1'] - tf - rt['prep'] - rt['link']
-        t_start = max(r['free_at'], c['ready_at'], t_depart, 0.0)
-        arrive = t_start + rt['prep'] + rt['link'] + tf
-        if arrive > job['t2'] + 1e-6:
-            skipped.append(dict(job=job, arrive=arrive))
-            continue
-        t_service = max(0.0, job['t2'] - arrive)
-        cost = relay_trip_cost(d, (st['lon'], st['lat'], st['alt_abs']), t_service)
-        r['free_at'] = t_start + cost['t_tot'] + rt['turnover']
-        soc_end = 1.0 - cost['E'] / rt['E_use']
-        c['ready_at'] = t_start + cost['t_tot'] + charge_time(soc_end, d.relay_batteries[1])
-        trips.append(dict(relay=r['id'], comp=c['id'], station=ci, ivs=list(job['ivs']),
-                          start=t_start, lon=st['lon'], lat=st['lat'], alt_abs=st['alt_abs'],
-                          hover_agl=st['agl'], ground_elev=st['ground'],
-                          link_done=arrive, service_end=arrive + t_service,
-                          return_t=t_start + cost['t_tot'], E=cost['E'], t_service=t_service,
-                          late=(arrive > job['t1'] + 1e-6)))
-    trips.sort(key=lambda x: x['start'])
-    if verbose:
-        print(f'中继架次: {len(trips)} 个（弃飞 {len(skipped)} 个）')
-    return trips, skipped
+def schedule_relays(d, jobs, cands, verbose=False, allow_chain=None):
+    """中继排班：按失效区间起点顺序贪心派发。
+
+    排班算法自阶段 13 起迁到 `q3_chain.py`（允许一次出动内站间接续），本函数只是
+    接线。保留「建链完成晚于区间结束即弃飞」规则——空飞同样占用中继与能源组件，
+    会把后续本可按时到达的架次一起顶迟到。
+    """
+    if allow_chain is None:
+        allow_chain = ALLOW_CHAIN_RELAY
+    return _schedule_relays_impl(d, jobs, cands, verbose=verbose,
+                                 allow_chain=allow_chain)
 
 
 # ===========================================================================
@@ -1808,14 +1778,16 @@ def solve_relay(d, assignment, greedy=False, single_hover=False, verbose=True):
                 # 推一个期望时刻很松的架次代价是 0、推一个很紧的代价是 优先系数×迟到秒，
                 # 两者在 Σ推迟量 里长得一模一样。随后是完工、能耗，末位才是推迟量
                 # （都无迟到时，少推一点仍是更干净的解）。
+                # 中继能耗按**出动**求和（一排一行 = 一次悬停站服务，出动级的 E 在
+                # 该出动的每一行上重复出现）。拼排班器名字取，不在这里另写一份。
                 return (px[1], round(px[0], 6), round(weighted_tardiness(d, asg)[0], 6),
-                        round(done, 6), round(sum(x['E'] for x in rls), 9),
+                        round(done, 6), round(q3_chain.outing_stats(rls)[1], 9),
                         round(sum(dl), 6))
             k1 = _key(px_a, deltas_a, asg_a, relays_a)
             k2 = _key(px2, r2['deltas'], r2['assignment'], r2['relays'])
             tag = (f'缺口 {k2[1]:.0f}s/无绑定 {k2[0]}、加权迟到 {k2[2]:.0f}、累计推迟 '
                    f'{sum(r2["deltas"]):.0f} s、联合完工 {k2[3]:.0f} s、中继能耗 '
-                   f'{sum(x["E"] for x in r2["relays"]):.3f} kWh；'
+                   f'{q3_chain.outing_stats(r2["relays"])[1]:.3f} kWh；'
                    f'旧：缺口 {k1[1]:.0f}s/无绑定 {k1[0]}、加权迟到 {k1[2]:.0f}、'
                    f'累计推迟 {sum(deltas_a):.0f} s、联合完工 {k1[3]:.0f} s')
             if k2 < k1:
@@ -1830,16 +1802,32 @@ def solve_relay(d, assignment, greedy=False, single_hover=False, verbose=True):
         jobs = merge_jobs(intervals, sel)
         relays, skipped = schedule_relays(d, jobs, cands, verbose=verbose)
     if verbose:
-        print(f'中继架次 {len(relays)} 个，弃飞 {len(skipped)} 个，'
-              f'迟建链 {sum(1 for x in relays if x["late"])} 个')
+        _n_out, _, _ = q3_chain.outing_stats(relays)
+        print(f'中继架次 {_n_out} 个（{len(relays)} 次悬停站服务），'
+              f'弃飞 {len(skipped)} 个，迟建链 {sum(1 for x in relays if x["late"])} 个')
 
     # 8) 中继硬约束自检
     rt = d.relay_type
     usable = (1 - rt['rho']) * rt['E_use']
-    over_E = [x for x in relays if x['E'] > usable + 1e-9]
+    # 能量上限按**整次出动**核算：站间接续把多次服务叠在一次出动里，逐行比会
+    # 只看单次悬停那一小截，把真正越限的出动放过去。故先按出动编号归并。
+    outing_E = {}
+    for x in relays:
+        outing_E.setdefault(x['outing'], x['E'])
+    over_E = ['%s(%.3f kWh)' % (od, E) for od, E in sorted(outing_E.items())
+              if E > usable + 1e-9]
     over_H = [x for x in relays if x['hover_agl'] > rt['max_hover_alt'] + 1e-9]
     if over_E or over_H:
-        raise RuntimeError('中继架次越限：能耗 %d 个、悬停高度 %d 个' % (len(over_E), len(over_H)))
+        raise RuntimeError('中继出动越限：能耗 %d 个（%s）、悬停高度 %d 个'
+                           % (len(over_E), '、'.join(over_E), len(over_H)))
+    # 每次出动的能耗必须等于其各次访问的份额之和（末次访问含末端返航段）。
+    # 这条恒等式把「按行程核算」与「按访问报账」钉在一起，防止两处口径日后分叉。
+    _sum_chk = {}
+    for x in relays:
+        _sum_chk[x['outing']] = _sum_chk.get(x['outing'], 0.0) + x['visit_E']
+    _dev = max((abs(_sum_chk[od] - E) for od, E in outing_E.items()), default=0.0)
+    if _dev > 1e-9:
+        raise RuntimeError('中继出动能耗与各访问份额之和不符，最大偏差 %.3e kWh' % _dev)
     # 运输侧资源链自检：同一条无人机/共享电池链上不得有占用重叠。这一条是**硬约束**，
     # 而 `audit()` 只看通信分段、看不见它——实测正是这里缺一道关，让「U05 同时飞
     # T17 与 T24（重叠 1583 s）」的排班以「零中断」的名义落了盘，最后由画图脚本
@@ -1905,11 +1893,14 @@ def main():
     # 对照二：序贯做法（固定 300 m、贪心选站、不错峰、不选高度、不做连续精化）
     seq2 = solve_relay(d, assignment, greedy=True, single_hover=True, verbose=False)
     f2 = None
+    # 序贯对照的架次/能耗也按出动核（阶段 13 起两档共用同一个排班器）
+    _seq2_out, _seq2_E, _ = (q3_chain.outing_stats(seq2['relays']) if seq2['ok']
+                             else (0, 0.0, 0))
     if seq2['ok']:
         f2, _, _ = audit(d, assignment, seq2['relays'], seq2['cands'])
         print(f'[对照] 序贯（固定300m + 贪心选站 + 不错峰）: '
               f'直连 {100*f2["direct"]:.2f}% | 中继 {100*f2["relay"]:.2f}% | '
-              f'中断 {100*f2["gap"]:.2f}%，中继架次 {len(seq2["relays"])}')
+              f'中断 {100*f2["gap"]:.2f}%，中继架次 {_seq2_out}')
 
     # 联合优化
     print('-' * 74)
@@ -1981,10 +1972,14 @@ def main():
                         min_margin, min_margin_box = mg, bid
     relay_done = max([x['return_t'] for x in res['relays']], default=0.0)
     trans_done = max(a['start'] + a['duration'] for a in assignment)
+    # 中继侧的两个报告口径一律按**出动**核（阶段 13 起一次出动可服务多个站）：
+    # 一排一行 = 一次悬停站服务，出动级的 E 在该出动的每一行上重复出现。
+    n_out, relay_E, n_chain = q3_chain.outing_stats(res['relays'])
     q3_m = dict(direct=frac['direct'], relay=frac['relay'], gap=frac['gap'],
                 total_time=frac['total_time'],
-                n_relays=len(res['relays']), n_stations=len(stations),
-                relay_energy_kwh=sum(x['E'] for x in res['relays']),
+                n_relays=n_out, n_relay_visits=len(res['relays']), n_chain=n_chain,
+                n_stations=len(stations),
+                relay_energy_kwh=relay_E,
                 skipped=len(res['skipped']), uncovered=len(res['uncovered']),
                 joint_done=joint_done,
                 makespan=trans_done,
@@ -1993,8 +1988,7 @@ def main():
                 min_hard_margin_s=(0.0 if min_margin == float('inf') else min_margin),
                 min_hard_margin_box=min_margin_box,
                 transport_done_s=trans_done, relay_done_s=relay_done,
-                joint_energy_kwh=(sum(a['E'] for a in assignment)
-                                  + sum(x['E'] for x in res['relays'])),
+                joint_energy_kwh=(sum(a['E'] for a in assignment) + relay_E),
                 n_staggered=sum(1 for x in res['deltas'] if x > 0),
                 total_delay_s=sum(res['deltas']))
     if q3_m['min_hard_margin_s'] < -1e-6:
@@ -2014,12 +2008,25 @@ def main():
     rid_by_index = {i: r['relay_trip_id'] for i, r in enumerate(relay_recs)}
     relay_xy = {x['station']: x for x in res['relays']}
 
+    # 中继架次表：**一行 = 一次悬停站服务**。这是唯一的原子口径——`q3_intervals.csv`
+    # 的区间绑定、`q3_comm_phases.csv` 的中继编号、以及 `verify.check_relay_final`
+    # 的逐秒重判都以它为单位，因此不能改成「一行一次出动」。
+    #
+    # 自阶段 13 起一次出动可依次服务多个站，于是列分两层：
+    #   出动级（同一次出动的各行取同值）：出动编号 / 中继无人机编号 / 能源组件编号 /
+    #       开始时刻s（离开 O01）/ 返回O01时刻s / 架次能耗kWh（**整次出动**的能耗）
+    #   访问级：中继架次编号 / 架次内序 / 悬停站与其坐标 / 建链完成时刻s / 服务结束时刻s /
+    #       本访问能耗kWh（本次进场航段 + 本站悬停；该次出动的末次访问另含末端返航）
+    # `架次能耗kWh` 是读表时**要按出动编号去重**的那个量；`本访问能耗kWh` 逐行相加
+    # 才等于它。二者由 verify.py 分别独立复核（去重后的上限、逐行求和的一致性）。
     rt_rows = []
     for r in relay_recs:
         x = next(y for y in res['relays'] if st_no.get(y['station'], '') == r['station_id']
                  and abs(y['start'] - r['start']) <= 1e-9)
         rt_rows.append(dict(
-            中继架次编号=r['relay_trip_id'], 中继无人机编号=r['relay_uav_id'],
+            中继架次编号=r['relay_trip_id'], 出动编号=r['outing_id'],
+            架次内序=r['seq_in_outing'],
+            中继无人机编号=r['relay_uav_id'],
             能源组件编号=r['component_id'], 悬停站编号=r['station_id'],
             开始时刻s=round(r['start'], T_DEC),
             悬停经度=round(x['lon'], 6), 悬停纬度=round(x['lat'], 6),
@@ -2028,7 +2035,8 @@ def main():
             悬停海拔m=round(x['alt_abs'], 3), 建链完成时刻s=round(r['link_done'], T_DEC),
             服务结束时刻s=round(r['service_end'], T_DEC),
             返回O01时刻s=round(r['return_time'], T_DEC),
-            架次能耗kWh=round(r['energy_kwh'], E_DEC)))
+            架次能耗kWh=round(r['energy_kwh'], E_DEC),
+            本访问能耗kWh=round(r['visit_energy_kwh'], E_DEC)))
     pd.DataFrame(rt_rows).to_csv(os.path.join(OUT, 'q3_relay_trips.csv'), index=False)
 
     # 通信分段表：编号一律取自方案，不按 `s['trip']+1` 现推。段边界是共同边界
@@ -2064,7 +2072,12 @@ def main():
         ('最小硬时限余量', q3_m['min_hard_margin_s'], 's'),
         ('错峰推迟架次数', q3_m['n_staggered'], '个'),
         ('累计推迟量', q3_m['total_delay_s'], 's'),
-        ('中继架次', q3_m['n_relays'], '个'), ('悬停站', q3_m['n_stations'], '个'),
+        # 阶段 13 起「中继架次」= 出动数（飞机出去几趟），与「悬停站服务次数」分开报：
+        # 一次出动可依次服务多个站，两个数是不同的量，混用会把接续算成额外架次。
+        ('中继架次', q3_m['n_relays'], '个'),
+        ('悬停站服务次数', q3_m['n_relay_visits'], '次'),
+        ('站间接续次数', q3_m['n_chain'], '次'),
+        ('悬停站', q3_m['n_stations'], '个'),
         ('弃飞中继架次', q3_m['skipped'], '个'), ('未保障失效区间', q3_m['uncovered'], '个'),
     ]
     pd.DataFrame([dict(指标=k, 数值=round(float(v), 6), 单位=u) for k, v, u in m_rows]
@@ -2122,16 +2135,16 @@ def main():
     cov_rows = [dict(口径='联合优化', 采样步长s=DT_AUDIT,
                      直连时间占比=round(frac['direct'], 6), 中继时间占比=round(frac['relay'], 6),
                      中断时间占比=round(frac['gap'], 6), 总时长s=round(frac['total_time'], 1),
-                     中继架次=len(res['relays']), 悬停站=len(stations),
-                     中继能耗kWh=round(sum(x['E'] for x in res['relays']), E_DEC)),
+                     中继架次=n_out, 悬停站=len(stations),
+                     中继能耗kWh=round(relay_E, E_DEC)),
                 dict(口径='序贯对照', 采样步长s=DT_AUDIT,
                      直连时间占比=round(f2['direct'], 6) if seq2['ok'] else None,
                      中继时间占比=round(f2['relay'], 6) if seq2['ok'] else None,
                      中断时间占比=round(f2['gap'], 6) if seq2['ok'] else None,
                      总时长s=round(f2['total_time'], 1) if seq2['ok'] else None,
-                     中继架次=len(seq2['relays']) if seq2['ok'] else None,
+                     中继架次=_seq2_out if seq2['ok'] else None,
                      悬停站=len({x['station'] for x in seq2['relays']}) if seq2['ok'] else None,
-                     中继能耗kWh=round(sum(x['E'] for x in seq2['relays']), E_DEC) if seq2['ok'] else None),
+                     中继能耗kWh=round(_seq2_E, E_DEC) if seq2['ok'] else None),
                 dict(口径='无中继', 采样步长s=DT_AUDIT,
                      直连时间占比=round(seq['direct'], 6), 中继时间占比=0.0,
                      中断时间占比=round(seq['outage'], 6), 总时长s=round(seq['total_time'], 1),
@@ -2145,9 +2158,9 @@ def main():
     pd.DataFrame(sg).to_csv(os.path.join(OUT, 'q3_stagger.csv'), index=False)
 
     print('-' * 74)
-    print(f'悬停站 {len(stations)} 个；中继架次 {len(res["relays"])} 个；'
-          f'中继总能耗 {sum(x["E"] for x in res["relays"]):.3f} kWh；'
-          f'弃飞 {len(res["skipped"])} 个')
+    print(f'悬停站 {len(stations)} 个；中继架次 {n_out} 个'
+          f'（其中站间接续 {n_chain} 次，共 {len(res["relays"])} 次悬停站服务）；'
+          f'中继总能耗 {relay_E:.3f} kWh；弃飞 {len(res["skipped"])} 个')
     print(f'交付侧：加权迟到 {q3_m["weight_tardiness"]:.1f} 权重·s'
           f'（迟到箱 {q3_m["n_late_boxes"]} 个，最长 {q3_m["max_late_s"]:.0f} s）；'
           f'最小硬时限余量 {q3_m["min_hard_margin_s"]:.0f} s'

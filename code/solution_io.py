@@ -56,8 +56,8 @@ DATA_DIR = os.path.join(ROOT, '数据')
 # q2_v2.py / q3_v2.py 是阶段 11 移植来的算法层（--engine v2、解法二并列路径）。
 # 它们不在这个表里就等于「论文的数来自一个不在记录里的文件」，故一并计入。
 Q2_SOLVER_FILES = ['core.py', 'q2.py', 'q2_v2.py', 'solution_io.py']
-Q3_SOLVER_FILES = ['core.py', 'q2.py', 'q2_v2.py', 'q3.py', 'q3_v2.py',
-                   'solution_io.py']
+Q3_SOLVER_FILES = ['core.py', 'q2.py', 'q2_v2.py', 'q3.py', 'q3_chain.py',
+                   'q3_v2.py', 'solution_io.py']
 
 REQUIRED_FIELDS = ['schema_version', 'solution_id', 'stage', 'input_hashes',
                    'solver_hashes', 'seed', 'budget']
@@ -492,18 +492,24 @@ def build_q3_solution(d, q2_sol, assignment, relays, intervals, st_no, m,
                          for s, bs in a['boxes_at'].items() for x in bs},
             base_start=float(b['start'])))
 
-    # 稳定排序：同刻架次保持列表原序（schedule_relays 已按开始时刻排过），
-    # 不用 id() 之类跨进程不稳定的键
-    relays = sorted(relays, key=lambda x: x['start'])
+    # 稳定排序：同刻按架次内序（同一次出动的多次访问共享开始时刻，必须按访问
+    # 顺序排，否则 R 编号会在同一次出动内部乱序）。刻意不用 id() 之类跨进程
+    # 不稳定的键。
+    relays = sorted(relays, key=lambda x: (x['start'], x.get('seq', 0)))
     rids = assign_relay_trip_ids(relays)
     relay_recs = []
     for x, rid in zip(relays, rids):
+        # 一行 = 一次悬停站服务。`energy_kwh` 是**整次出动**的能耗（同一次出动的
+        # 各行取同值，读表要按 outing_id 去重），`visit_energy_kwh` 是本次访问的
+        # 份额（进场航段 + 本站悬停，末次访问另含末端返航），逐行相加等于前者。
         relay_recs.append(dict(
             relay_trip_id=rid, relay_uav_id=x['relay'], component_id=x['comp'],
             station_id=st_no.get(x['station'], ''),
+            outing_id=x['outing'], seq_in_outing=int(x['seq']),
             start=float(x['start']), link_done=float(x['link_done']),
             service_end=float(x['service_end']), return_time=float(x['return_t']),
-            energy_kwh=float(x['E']), hover_agl_m=float(x['hover_agl']),
+            energy_kwh=float(x['E']), visit_energy_kwh=float(x['visit_E']),
+            hover_agl_m=float(x['hover_agl']),
             interval_ids=['G%02d' % (j + 1) for j in sorted(x['ivs'])],
             late=bool(x['late'])))
 

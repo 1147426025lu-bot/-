@@ -48,7 +48,12 @@
 	关键结论（如 C 型机在 S008 的最大安全载荷）均由本队脚本独立复算核对。 \\
 	\midrule
 	使用目的与环节二：程序编写与调试 &
-	用于编写与排错 Python 求解脚本（\texttt{code/} 目录下的 core.py、q1.py、q2.py、q3.py、q4.py、figures.py、make\_roadmap.py、render\_drawio.py），
+	用于编写与排错 Python 脚本。\texttt{code/} 目录下的全部 \texttt{.py} 文件均在此环节由工具辅助编写或修订，包括求解器
+	（core.py、q1.py、q2.py、q2\_v2.py、q2\_exact.py、q3.py、q3\_chain.py、q3\_v2.py、q4.py、solution\_io.py）、
+	复核与测试脚本（verify.py、tests\_regression.py、check\_layout\_gates.py）、
+	只读派生与指标脚本（make\_seed\_stats.py、make\_q3\_sens.py、make\_q4\_sens.py、make\_data\_table.py、make\_delivery\_table.py、paper\_metrics.py、fill\_results.py）、
+	绘图与生成脚本（figures.py、figures\_adv.py、make\_roadmap.py、make\_q2\_algorithm.py、render\_drawio.py）以及打包脚本 build\_submission.py，
+	涉及 DEM 采样与视线遮挡判定、二分法求最大安全载荷、FFD 装箱、离散事件调度与贪心集合覆盖等。 \\
 	涉及 DEM 采样与视线遮挡判定、二分法求最大安全载荷、FFD 装箱、离散事件调度与贪心集合覆盖等。 \\
 	主要提示与过程 &
 	提供报错信息、相关函数片段与期望输出，请工具分析原因并给出修改建议；对算法结构性问题（如调度回环的终止条件）

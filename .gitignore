@@ -13,6 +13,8 @@ LiSu.ttf
 提交包/
 
 # === LaTeX 编译中间文件 ===
+# 逐文件列出而非 *.aux 通配：AI工具使用详情.tex/.pdf 是入仓库的正文，
+# 用「AI工具使用详情.*」会连它们的改动一起挡在 git status 之外。
 main.aux
 main.log
 main.out
@@ -20,6 +22,11 @@ main.toc
 main.xdv
 main.fls
 main.fdb_latexmk
+AI工具使用详情.aux
+AI工具使用详情.log
+AI工具使用详情.xdv
+AI工具使用详情.fls
+AI工具使用详情.fdb_latexmk
 *.synctex.gz
 
 # === 个人杂项 ===
