@@ -5,7 +5,7 @@
 
 \subsection{地形净空与航段几何}
 
-任意两节点 $i,j$ 间采用水平直线航段。设节点地理坐标为经纬度 $(\lambda,\varphi)$，先按局部平面投影换算为水平距离。地形高程取自 30\,m 分辨率的 Copernicus 全球数字高程模型\cite{copernicus2024dem}。计划巡航海拔取该航段所经过 DEM 像元的最高地面高程再加 50\,m，即
+任意两节点 $i,j$ 间采用水平直线航段。设节点地理坐标为经纬度 $(\lambda,\varphi)$，先按局部平面投影换算为水平距离。地形高程取自 30\,m 分辨率的 Copernicus 全球数字高程模型\cite{copernicus2024dem}——该产品实为\textbf{数字表面模型}（DSM，含植被与建筑顶部），与题面「最高地面高程」措辞的差异及其影响方向见 \ref{sec:dem-caliber} 节。计划巡航海拔取该航段所经过 DEM 像元的最高地面高程再加 50\,m，即
 \begin{equation}
 	H_{ij}^{\mathrm{cruise}} = \max_{(u,v)\in \mathcal{C}(\overline{ij})} z_{\mathrm{DEM}}(u,v) + 50,
 	\label{eq:cruise-alt}
