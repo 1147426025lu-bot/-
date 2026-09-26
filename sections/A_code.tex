@@ -1,6 +1,6 @@
 \section{求解代码清单}
 
-本文全部求解代码位于项目 \texttt{code/} 目录，每个问题一个独立脚本，按序运行即可复现全文结果。所有代码均为 Python 3 实现，依赖标准科学计算与绘图库（numpy、pandas、matplotlib、seaborn、networkx，以及用于整数规划与二分求解的 scipy）。问题一、三、四的求解是确定性的（精确动态规划、整数规划与完全枚举），不含任何随机成分；问题二的大邻域自适应搜索是启发式，其随机流由脚本内的固定种子 \texttt{ALNS\_SEED} 初始化，故同一份代码重复运行的结果逐位一致。为检验该结果对种子的依赖，本文另做多种子稳定性对照（\texttt{make\_seed\_stats.py}，$4$ 个架次档 $\times$ $5$ 个种子 $=$ \mtQtwoSeedRuns 个组合，落盘 \texttt{results/q2\_seeds.csv}，只读派生、不写任何方案记录）：种子之间的完工时刻极差随档位放宽而收窄，由 $K\le20$ 档的 \mtQtwoSeedSpreadKTwenty\,s 降到交付档 $K\le25$ 的 \mtQtwoSeedSpreadKTwentyFive\,s、$K\le30$ 档的 \mtQtwoSeedSpreadKThirty\,s，且 $K\le30$ 档 $5$ 个种子中有 \mtQtwoSeedSameKThirty 个落到四项指标逐位相同的解。该对照只回答「换一组种子结果会不会面目全非」，\textbf{不构成最优性证明}——本文仍不据此声称该解已最优，其质量由 §6.3 的两层小规模精确解标定。
+我们全部求解代码位于项目 \texttt{code/} 目录，每个问题一个独立脚本，按序运行即可复现全文结果。所有代码均为 Python 3 实现，依赖标准科学计算与绘图库（numpy、pandas、matplotlib、seaborn、networkx，以及用于整数规划与二分求解的 scipy）。问题一、三、四的求解是确定性的（精确动态规划、整数规划与完全枚举），不含任何随机成分；问题二的大邻域自适应搜索是启发式，其随机流由脚本内的固定种子 \texttt{ALNS\_SEED} 初始化，故同一份代码重复运行的结果逐位一致。该结果对种子的依赖另有多种子稳定性对照（\texttt{make\_seed\_stats.py}，$4$ 个架次档 $\times$ $5$ 个种子 $=$ \mtQtwoSeedRuns 个组合，落盘 \texttt{results/q2\_seeds.csv}，只读派生、不写任何方案记录）：种子之间的完工时刻极差随档位放宽而收窄，由 $K\le20$ 档的 \mtQtwoSeedSpreadKTwenty\,s 降到交付档 $K\le25$ 的 \mtQtwoSeedSpreadKTwentyFive\,s、$K\le30$ 档的 \mtQtwoSeedSpreadKThirty\,s，且 $K\le30$ 档 $5$ 个种子中有 \mtQtwoSeedSameKThirty 个落到四项指标逐位相同的解。该对照只回答「换一组种子结果会不会面目全非」，\textbf{不构成最优性证明}——我们仍不据此声称该解已最优，其质量由 §6.3 的两层小规模精确解标定。
 
 % 按《人工智能工具及输出使用规定》第 5 条，使用人工智能工具辅助编程的，应在程序前添加
 % 注释说明工具名称、版本/型号、开发机构与版本发布日期；各 .py 文件首部均已按要求标注。
@@ -68,7 +68,7 @@
 % 两段都含长串不可断的文件名与英文模型名，必须一起放进 sloppypar，
 % 否则 TeX 无法找到合法断点，会产生 Overfull \hbox。
 \begin{sloppypar}
-\noindent\textbf{数据来源注释：}本文全部数据分析结果由本队在人工智能工具辅助下编写的求解脚本计算得到，所用工具为 DeepSeek，版本/型号 DeepSeek V4.1 Flash（API 模型名 \texttt{deepseek-flash}），版本发布日期 2026 年 9 月 10 日，开发机构为杭州深度求索人工智能基础技术研究有限公司\cite{deepseek2026}；各脚本首部与支撑材料《AI 工具使用详情》中已列明工具信息与使用过程；其中 \texttt{q3\_chain.py} 的字节内容已写入第三问方案记录的求解器哈希，改动它会使该记录失效，故其工具信息随同一条求解链上的 \texttt{q3.py} 一并声明。全部数据均由本队独立重复运行核验。
+\noindent\textbf{数据来源注释：}全部数据分析结果由本队在人工智能工具辅助下编写的求解脚本计算得到，所用工具为 DeepSeek，版本/型号 DeepSeek V4.1 Flash（API 模型名 \texttt{deepseek-flash}），版本发布日期 2026 年 9 月 10 日，开发机构为杭州深度求索人工智能基础技术研究有限公司\cite{deepseek2026}；各脚本首部与支撑材料《AI 工具使用详情》中已列明工具信息与使用过程；其中 \texttt{q3\_chain.py} 的字节内容已写入第三问方案记录的求解器哈希，改动它会使该记录失效，故其工具信息随同一条求解链上的 \texttt{q3.py} 一并声明。全部数据均由本队独立重复运行核验。
 
 问题一最大安全载荷、推荐组批方案、帕累托前沿与双路径复核结果见 \texttt{results/q1\_max\_payload.csv}、\texttt{q1\_recommended\_batching.csv}、\texttt{q1\_pareto.csv}、\texttt{q1\_ilp\_gap.csv} 与 \texttt{q1\_sensitivity.csv}；问题二运输架次、逐箱交付时刻、推荐方案快照、非支配前沿、消融与精确验证结果见 \texttt{results/q2\_transport\_trips.csv}、\texttt{q2\_box\_delivery.csv}、\texttt{q2\_recommended.json}、\texttt{q2\_pareto.csv}、\texttt{q2\_ablation.csv} 与 \texttt{q2\_exact.csv}；问题三悬停站选址、失效区间绑定、中继架次、错峰量、通信阶段与三种口径的覆盖率对照见 \texttt{results/q3\_stations.csv}、\texttt{q3\_intervals.csv}、\texttt{q3\_relay\_trips.csv}、\texttt{q3\_stagger.csv}、\texttt{q3\_comm\_phases.csv} 与 \texttt{q3\_coverage.csv}；问题四原子任务单元、分区配置、全部分区枚举与两类方案对照见 \texttt{results/q4\_units.csv}、\texttt{q4\_partition.csv}、\texttt{q4\_all\_partitions.csv} 与 \texttt{q4\_comparison.csv}。
 \end{sloppypar}
