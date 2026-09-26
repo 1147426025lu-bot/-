@@ -62,7 +62,7 @@
 
 	\textbf{对于问题二}，在医疗与首批物资硬时限、机队与电池库存、充电周转约束下，把货箱组批、服务区访问顺序、机型、执行无人机、共享电池、派工顺序与各架次开始时刻一并作为决策变量，以精确组批耦合大邻域自适应搜索、并用 $\varepsilon$-约束扫描架次数上限，得 \mtQtwoRecTrips\ 个运输架次、总能耗 \mtQtwoEnergy\,kWh、完成时间 \mtQtwoMakespan\,s，加权时延与硬时限违约均为 $0$。消融实验显示，仅优化派工顺序就使完成时间下降 $31.9\%$，表明调度结构本身是系统效率的重要来源。
 
-	\textbf{对于问题三}，沿问题二方案的三维轨迹逐时刻判定直连链路，得直连时间占比 $\mtQthreeDirect$、盲区 $\mtQthreeRelayFrac$——运输层的高效方案在“连续通信、中断必须为 $0$”的硬约束下不可执行。我们对运输时序、中继站址与离地高度以及中继服务调度进行统一建模，并采用分层协调策略求解，以候选站网格配合集合覆盖整数规划最小化站数与中继能耗，得 \mtQthreeStations\ 个悬停站、\mtQthreeRelays\ 次出动共 \mtQthreeRelayVisits\ 次悬停站服务、中继能耗 \mtQthreeRelayEnergy\,kWh，在我们的二值视线遮挡口径下中断占比由 $\mtQthreeRelayFrac$ 降至 $0$；代价是联合完工时刻由 \mtQtwoMakespan\,s 推迟至 \mtQthreeJointDone\,s，而迟到箱数与加权迟到仍为 $0$，表明连续通信可靠性与应急时效间存在明确权衡。
+	\textbf{对于问题三}，沿问题二方案的三维轨迹逐时刻判定直连链路，得直连时间占比 $\mtQthreeDirect$、盲区 $\mtQthreeRelayFrac$——运输层的高效方案在“连续通信、中断必须为 $0$”的硬约束下不可执行。我们把运输时序、中继站址与离地高度以及中继服务调度进行统一建模，并以三维候选站覆盖、中继链调度与运输错峰协调求解，\textbf{在满足连续通信硬约束的前提下}，得 \mtQthreeStations\ 个悬停站、\mtQthreeRelays\ 次出动共 \mtQthreeRelayVisits\ 次悬停站服务、中继能耗 \mtQthreeRelayEnergy\,kWh，在我们的二值视线遮挡口径下中断占比由 $\mtQthreeRelayFrac$ 降至 $0$；代价是联合完工时刻由 \mtQtwoMakespan\,s 推迟至 \mtQthreeJointDone\,s，而迟到箱数与加权迟到仍为 $0$，表明连续通信可靠性与应急时效间存在明确权衡。
 
 	\textbf{对于问题四}，按“同一架次的服务区不可拆分”把 15 个服务区绑定为 \mtQfourUnits\ 个原子任务单元，$K=2$ 与 $K=3$ 的 2047 与 $86\,526$ 种分区经完全枚举即得全局最优的资源核算。按题面“资源不得跨组调配”复核，两种分组的库存可行分区数均为 \mtQfourFeasible；枚举进一步厘清成因：八类资源各自的最小缺口在两 $K$ 下\textbf{全部为 $0$}，逐类看均有解，故不可行来自多类资源无法在同一分区内同时满足的\textbf{联合约束}，其中中继下界 $K-1$ 在 $K=3$ 时恰等于库存、余量为 $0$。推荐分区在 $K=2$ 缺 \mtQfourGapSum\ 件、$K=3$ 缺 \mtQfourMinPatchKThree\ 件，故给出补配清单而非可行分区。
 
