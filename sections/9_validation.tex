@@ -7,7 +7,7 @@ DEM 口径对照与求解规模核算五方面展开，共七节：\ref{sec:feas
 资源到底有多紧」；\ref{sec:sens-rho}、\ref{sec:sens-thresh} 两节为灵敏度分析，前者扰动题给
 物理参数 $\rho$ 与 $\kappa$，后者扰动我们自己定下的参数；\ref{sec:cross-check} 节为结果交叉验证与
 结构一致性；\ref{sec:dem-caliber} 节为 DEM 口径对照；\ref{sec:solve-scale} 节为求解规模核算。
-需要强调的是，可行性检验若仅由求解程序自报，无法排除程序内部状态出错的可能。为此我们另写一支独立复核脚本 \texttt{code/verify.py}，\textbf{只读四问的结果表}（不调用求解器的任何中间变量）重新计算四问的硬约束，结果分别见表~\ref{tab:q1check}--\ref{tab:q4check}（其中表~\ref{tab:q1ilp}、表~\ref{tab:q3metrics}、表~\ref{tab:q3chain}是本轮为问题一的第二路径与问题三的交付侧、资源链新增的三项复核，表~\ref{tab:relaycheck}中「出动内能量账目」一行则是 7.4 节连飞出动新增的账目复核，表~\ref{tab:q3lbcheck}是同一机制在\textbf{时间维度}上的补项——它按 DEM 重建站间转场与末段返航的最短耗时，并核验 7.7 节那条受限口径下界）。该脚本同时复现 \ref{sec:dem-caliber}~节的 DEM 离散化误差，代码清单见附录~\ref{tab:code-list}。这里须说明复核的边界：脚本与求解器仍共享公共物理模块 \texttt{core.py}（地形净空、能耗、充电、链路）。因此它排除的是\textbf{求解程序内部状态与结果表之间的串号、漏检与自我印证}，并不能排除公共物理模型本身的口径错误——后者只能靠 \ref{sec:dem-caliber}~节的口径对照与原始数据判读，不能被「两份程序算得一致」所替代。
+需要强调的是，可行性检验若仅由求解程序自报，无法排除程序内部状态出错的可能。为此我们另写一支独立复核脚本 \texttt{code/verify.py}，\textbf{只读四问的结果表}（不调用求解器的任何中间变量）重新计算四问的硬约束，结果分别见表~\ref{tab:q1check}--\ref{tab:q4check}（其中表~\ref{tab:q1ilp}、表~\ref{tab:q3metrics}、表~\ref{tab:q3chain}是本轮为问题一的第二路径与问题三的交付侧、资源链新增的三项复核，表~\ref{tab:relaycheck}中「出动内能量账目」一行则是 7.4 节连飞出动新增的账目复核，表~\ref{tab:q3lbcheck}是同一机制在\textbf{时间维度}上的补项——它按 DEM 重建站间转场与末段返航的最短耗时，并核验 7.7 节那条受限口径下界）。该脚本同时复现 \ref{sec:dem-caliber}~节的 DEM 离散化误差，代码清单见表~\ref{tab:code-list}。这里须说明复核的边界：脚本与求解器仍共享公共物理模块 \texttt{core.py}（地形净空、能耗、充电、链路）。因此它排除的是\textbf{求解程序内部状态与结果表之间的串号、漏检与自我印证}，并不能排除公共物理模型本身的口径错误——后者只能靠 \ref{sec:dem-caliber}~节的口径对照与原始数据判读，不能被「两份程序算得一致」所替代。
 
 \subsection{可行性检验：运输与通信硬约束}
 \label{sec:feasib-hard}

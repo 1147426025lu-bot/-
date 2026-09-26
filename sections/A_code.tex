@@ -1,6 +1,47 @@
 \section{求解代码清单}
 
-我们全部求解代码位于项目 \texttt{code/} 目录，按模块化组织：四个问题各设主求解脚本，公共物理模型与方案读写抽为共享模块，精确验证、独立复核与结果生成另设脚本；按 \texttt{results/\_交付与复现说明.txt} 给出的复现序列依次运行，即可复现论文的主要结果。所有代码均为 Python 3 实现，依赖标准科学计算与绘图库（numpy、pandas、matplotlib、seaborn、networkx，以及用于整数规划与二分求解的 scipy）。在离散优化上，问题一用同质类多重集动态规划在其可行域上求精确最优，问题四的分区由完全枚举给出、枚举结果即全局最优；问题三以集合覆盖整数规划在给定候选站集上精确选站，其余各层（连续站址精化、中继架次与链式服务调度、运输错峰、就绪性与换站修复）则都是\textbf{确定性的分层协调求解}。因此问题一、三、四的求解都不含随机搜索，但\textbf{问题三不据此宣称整体全局最优}——站址、区间归属与运输时序的外层搜索并未进行（见第 \ref{sec:q3-cost} 节）。问题二的大邻域自适应搜索是启发式，其随机流由脚本内的固定种子 \texttt{ALNS\_SEED} 初始化，故同一份代码重复运行的结果逐位一致。该结果对种子的依赖另有多种子稳定性对照（\texttt{make\_seed\_stats.py}，$4$ 个架次档 $\times$ $5$ 个种子 $=$ \mtQtwoSeedRuns 个组合，落盘 \texttt{results/q2\_seeds.csv}，只读派生、不写任何方案记录）：种子之间的完工时刻极差随档位放宽而收窄，由 $K\le20$ 档的 \mtQtwoSeedSpreadKTwenty\,s 降到交付档 $K\le25$ 的 \mtQtwoSeedSpreadKTwentyFive\,s、$K\le30$ 档的 \mtQtwoSeedSpreadKThirty\,s，且 $K\le30$ 档 $5$ 个种子中有 \mtQtwoSeedSameKThirty 个落到四项指标逐位相同的解。该对照只回答「换一组种子结果会不会面目全非」，\textbf{不构成最优性证明}——我们仍不据此声称该解已最优，其质量由 §6.3 的两层小规模精确解标定。
+我们全部求解代码位于项目 \texttt{code/} 目录，按模块化组织：四个问题各设主求解脚本，公共物理模型与方案读写抽为共享模块，精确验证、独立复核与结果生成另设脚本；按第 \ref{sec:run-order} 节给出的运行顺序依次执行，即可复现论文的主要结果，更完整的环境与口径说明见随包分发的 \texttt{results/\_交付与复现说明.txt}。所有代码均为 Python 3 实现，依赖标准科学计算与绘图库（numpy、pandas、matplotlib、seaborn、networkx，以及用于整数规划与二分求解的 scipy）。在离散优化上，问题一用同质类多重集动态规划在其可行域上求精确最优，问题四的分区由完全枚举给出、枚举结果即全局最优；问题三以集合覆盖整数规划在给定候选站集上精确选站，其余各层（连续站址精化、中继架次与链式服务调度、运输错峰、就绪性与换站修复）则都是\textbf{确定性的分层协调求解}。因此问题一、三、四的求解都不含随机搜索，但\textbf{问题三不据此宣称整体全局最优}——站址、区间归属与运输时序的外层搜索并未进行（见第 \ref{sec:q3-cost} 节）。问题二的大邻域自适应搜索是启发式，其随机流由脚本内的固定种子 \texttt{ALNS\_SEED} 初始化，故同一份代码重复运行的结果逐位一致。该结果对种子的依赖另有多种子稳定性对照（\texttt{make\_seed\_stats.py}，$4$ 个架次档 $\times$ $5$ 个种子 $=$ \mtQtwoSeedRuns 个组合，落盘 \texttt{results/q2\_seeds.csv}，只读派生、不写任何方案记录）：种子之间的完工时刻极差随档位放宽而收窄，由 $K\le20$ 档的 \mtQtwoSeedSpreadKTwenty\,s 降到交付档 $K\le25$ 的 \mtQtwoSeedSpreadKTwentyFive\,s、$K\le30$ 档的 \mtQtwoSeedSpreadKThirty\,s，且 $K\le30$ 档 $5$ 个种子中有 \mtQtwoSeedSameKThirty 个落到四项指标逐位相同的解。该对照只回答「换一组种子结果会不会面目全非」，\textbf{不构成最优性证明}——我们仍不据此声称该解已最优，其质量由 §6.3 的两层小规模精确解标定。
+
+\subsection{程序运行顺序}
+\label{sec:run-order}
+
+支撑材料解压后，在工程根目录按下述顺序执行即可复现全文结果。代码为 Python 3，中文 Windows 的控制台默认 GBK，运行前须设环境变量 \texttt{PYTHONIOENCODING=utf-8}，否则脚本的中文输出与文件名会报编码错；随机种子只通过 \texttt{PYTHONHASHSEED} 传入。
+
+\textbf{第一步，求解。}按序执行，后一步读取前一步落盘的方案记录：
+
+\begin{center}
+	\texttt{\small
+		python code/q1.py\\
+		python code/q2.py -{}-engine v2 -{}-seeds 5 -{}-iters 3500\\
+		\hspace{4em}-{}-k-targets 20,22,25,30\\
+		python code/q2\_exact.py\\
+		python code/q3.py\\
+		python code/q4.py}
+\end{center}
+
+% 以下五段都含成串的 \texttt 文件名，逐项之间只有「、」可断（XeTeX 的 CJK 断点
+% 不吸收 \emergencystretch），默认参数下 TeX 宁可让整行溢出也不肯拉松，实测
+% Overfull \hbox 53.3pt 与 6.1pt 各一条。与「数据来源注释」两段同一处置：放进
+% sloppypar（\tolerance=9999 + \emergencystretch），让 TeX 选择拉松而非溢出。
+\begin{sloppypar}
+\noindent 上面只列需要单独执行的脚本：\texttt{q2.py} 的 \texttt{-{}-engine v2} 档在脚本内部调用 \texttt{q2\_v2.py}，\texttt{q3.py} 在脚本内部调用 \texttt{q3\_chain.py}，故这两者不必、也不应单独执行；\texttt{core.py}（公共物理模型）与 \texttt{solution\_io.py}（方案记录读写）为被各主脚本共同引用的共享模块，单独执行不产生任何结果，故不在序列中。各问单次求解的实测耗时见第 \ref{sec:solve-scale} 节的表~\ref{tab:solve-scale}。
+
+\textbf{第二步，独立复核。}执行 \texttt{python code/verify.py}（应退出码 $0$、$12$ 项全部通过）与 \texttt{python code/tests\_regression.py}（应 $33$ 项全部通过、$0$ 跳过）。二者只读 \texttt{results/} 下的结果表，不复用求解器的代码路径。
+
+\textbf{第三步，数字与图表。}先执行五个\emph{只读派生}脚本 \texttt{code/make\_seed\_stats.py}、\texttt{make\_q3\_sens.py}、\texttt{make\_q4\_sens.py}、\texttt{make\_data\_table.py}、\texttt{make\_delivery\_table.py}——它们只调用求解器的既有函数、不写任何方案记录，故可单独重跑而不作废已落盘的结果；再依次执行 \texttt{code/paper\_metrics.py}、\texttt{fill\_results.py}、\texttt{figures.py}、\texttt{figures\_adv.py}、\texttt{make\_roadmap.py}、\texttt{make\_q2\_algorithm.py}、\texttt{render\_drawio.py}（每个 \texttt{.drawio} 各传一次路径）。论文正文的数字不由人工誊写，全部 \texttt{\textbackslash mtXXX} 宏取自 \texttt{results/paper\_metrics.json}。
+
+\textbf{第四步，编译与打包。}执行
+
+\begin{center}
+	\texttt{\small latexmk -g -xelatex -interaction=nonstopmode main.tex}
+\end{center}
+
+\noindent 编译论文；再用 \texttt{python code/check\_layout\_gates.py} 核验四条版式判据与「摘要恰一页」，退出码 $0$ 即全部通过；最后 \texttt{python build\_submission.py -{}-check} 预检、再不带参数执行打包。
+
+\noindent 需要提醒的是：任一落盘记录被改动、或其源码哈希失效时，方案加载器会拒绝读入并报错，而不会静默沿用过期方案——遇到这类报错，请从第一步起重跑整链。
+\end{sloppypar}
+
+\subsection{代码与结果文件职责}
 
 % 按《人工智能工具及输出使用规定》第 5 条，使用人工智能工具辅助编程的，应在程序前添加
 % 注释说明工具名称、版本/型号、开发机构与版本发布日期；各 .py 文件首部均已按要求标注。
