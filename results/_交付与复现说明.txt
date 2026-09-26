@@ -25,8 +25,8 @@
      问题三的逐时刻审计步长 1.0 s、搜索步长 2.0 s。
      任一落盘记录被改动、或其源码哈希失效时，加载器会拒绝读入并报错，
      不会静默使用过期方案——遇到报错请从 q1 起重跑整链。
-  3) 复核：code/verify.py（应退出码 0，11 项全过）；
-          code/tests_regression.py（应 32 项全过、0 跳过）。
+  3) 复核：code/verify.py（应退出码 0，12 项全过）；
+          code/tests_regression.py（应 33 项全过、0 跳过）。
   4) 数字与图表：code/make_seed_stats.py、code/make_q3_sens.py、code/make_q4_sens.py、
      code/make_data_table.py、code/make_delivery_table.py —— 这五个是**只读派生**
      脚本：只调用求解器的既有函数、一律 save=False，不写任何方案记录，也不在
@@ -303,6 +303,34 @@
        本轮重编译 main.pdf 仍 75 页；check_layout_gates.py 五项全过、verify.py 12 项
        全过、tests_regression.py 33 项 0 跳过、build_submission.py --check 退出 0
        （31 项清单齐全）。**未改任何结果数字、未重跑求解器、未刷新 results/*.json**。
+     · 阶段20 附录 A 开头句修订 + 更正一处过期计数（**只改 sections/A_code.tex 的一句，
+       外加本说明文档 §二的计数**）：
+       (1) 附录 A 开头原写"我们全部求解代码位于项目 code/ 目录，**每个问题一个独立脚本**，
+           按序运行即可复现全文结果"，与工程实际不符：code/ 下共 27 个 .py，四个问题各设
+           主求解脚本（q1/q2/q3/q4），另有共享模块与复核、生成脚本（core.py、
+           solution_io.py、q2_v2.py、q2_exact.py、q3_chain.py、verify.py、
+           tests_regression.py、check_layout_gates.py、paper_metrics.py、fill_results.py、
+           figures*.py、make_*.py 等），并非"一题一脚本"。现改为"按模块化组织：四个问题
+           各设主求解脚本，公共物理模型与方案读写抽为共享模块，精确验证、独立复核与结果
+           生成另设脚本；按 results/_交付与复现说明.txt 给出的复现序列依次运行，即可复现
+           论文的主要结果"。
+       (2) **须如实说明：外部建议稿里"按附录给出的执行顺序运行"这半句没有采纳。**
+           附录 A 只有一句引言加一张代码清单表（表 A.1），**不含任何执行顺序小节**；
+           全篇可执行的复现序列只有一处，就是本说明文档 §二第 2 步那五行命令。照原建议
+           写，等于用论文正文指向一个不存在的小节。故句子改为直接指向本文件——它随
+           zip 分发，就在 results/_交付与复现说明.txt（属清单 31 项之一）。
+       (3) 同句"复现全文结果"一并改为"复现论文的主要结果"：问题一 q1.py 的集合划分 ILP
+           路径带每阶段 300 s 时限（code/q1.py:69 ILP_TIME_LIMIT），在更慢的机器上可能
+           落到不同的可行解，故不宜对"全文结果"作无条件承诺。
+       (4) 顺带更正 §二第 3 步的**过期计数**：原写"verify.py 应 11 项全过、
+           tests_regression.py 应 32 项全过"，实测为 **12 项 / 33 项**（第 11、12 项与
+           用例 T24 是后加的，见上文相应阶段的记录）。**第 156、158、201、227 行那几处
+           "11 项 / 32 项"不动**——它们是各阶段当时的事实记录，改了就成篡改历史；
+           只有 §二这份"该怎么复核"的操作性指引必须与当前代码逐字一致。
+       本轮重编译 main.pdf 仍 75 页、main.log 中 ^! 计数 0；check_layout_gates.py 五项
+       全过；重打包后 build_submission.py --check 退出 0（31 项清单齐全，zip 138 文件 /
+       27.7 MB）。**未改任何结果数字、未重跑求解器、未刷新 results/*.json，七个字节入
+       哈希的求解器文件一个字节未动。**
 
 五、未做的复核（如实列出，不得当作已做）
   · 多种子只做了**稳定性**对照，未做"跑更多种子取最优"的寻优：code/make_seed_stats.py
