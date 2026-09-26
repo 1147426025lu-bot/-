@@ -76,11 +76,11 @@
 \begin{subequations}
 	\label{eq:q1-cons}
 	\begin{align}
-		\sum_{p\in\mathcal{P}_i} y_{cp} &= 1, && \forall c\in\mathcal{C}_i,\ \forall i; \label{eq:q1-c1}\\
-		\sum_{g\in\{A,B,C\}} z_{pg} &\le 1, && \forall p; \label{eq:q1-c2}\\
-		\sum_{c\in\mathcal{C}_i} m_c\,y_{cp} &\le \sum_{g} z_{pg}\,q_{\max,gi}, && \forall p\in\mathcal{P}_i; \label{eq:q1-c3}\\
-		\sum_{c\in\mathcal{C}_i} v_c\,y_{cp} &\le \sum_{g} z_{pg}\,V^{\mathrm{load}}_{g}, && \forall p\in\mathcal{P}_i; \label{eq:q1-c4}\\
-		E_i^{\mathrm{RT}}\Big(\sum_{c\in\mathcal{C}_i} m_c\,y_{cp}\Big) &\le \sum_{g} z_{pg}\,(1-\rho_g)E_g^{\mathrm{use}}, && \forall p\in\mathcal{P}_i. \label{eq:q1-c5}
+		\sum_{p\in\mathcal{P}_i} y_{cp} &= 1, && \forall c\in\mathcal{C}_i,\ \forall i; \tag{C1}\label{eq:q1-c1}\\
+		\sum_{g\in\{A,B,C\}} z_{pg} &\le 1, && \forall p; \tag{C2}\label{eq:q1-c2}\\
+		\sum_{c\in\mathcal{C}_i} m_c\,y_{cp} &\le \sum_{g} z_{pg}\,q_{\max,gi}, && \forall p\in\mathcal{P}_i; \tag{C3}\label{eq:q1-c3}\\
+		\sum_{c\in\mathcal{C}_i} v_c\,y_{cp} &\le \sum_{g} z_{pg}\,V^{\mathrm{load}}_{g}, && \forall p\in\mathcal{P}_i; \tag{C4}\label{eq:q1-c4}\\
+		E_i^{\mathrm{RT}}\Big(\sum_{c\in\mathcal{C}_i} m_c\,y_{cp}\Big) &\le \sum_{g} z_{pg}\,(1-\rho_g)E_g^{\mathrm{use}}, && \forall p\in\mathcal{P}_i. \tag{C5}\label{eq:q1-c5}
 	\end{align}
 \end{subequations}
 其中 (C1) 要求每个货箱\textbf{恰好}由一个架次承运，且求和限在 $\mathcal{P}_i$ 内——既不许拆分，也不许跨服务区组批；(C2) 限定一个架次最多用一个机型，这一条把「架次模式」的机型维度写成显式的 0-1 变量；(C3)(C4) 是载质量与装载体积约束，右端随 $z_{pg}$ 随机型切换；(C5) 是式~\eqref{eq:energy-margin} 的返航能量余量，式中 $x_p=\sum_g z_{pg}$。
@@ -145,12 +145,12 @@
 
 本节用两条引理说明 §5.2 的逐区求解为何等价于全局最优，以及式~\eqref{eq:q1-lex} 的第三层目标在什么条件下不产生额外区分。引理 1 在 \texttt{code/q1.py} 中有同名的运行时数值断言 \texttt{assert\_time\_affine()} 作为支撑；引理 2 是结构性的，其在代码中的体现是逐区独立求解、不做跨区联合枚举，并\textbf{完整保留逐区的非支配标签集}——下面的证明会说明，这一点是引理成立的必要条件，只留最小能耗是不行的。
 
-\textbf{引理 1（作业时间对架次数严格仿射）}。由式~\eqref{eq:energy-margin} 所在的物理模型可知，航段飞行时间只由爬升、巡航、下降三段构成，\textbf{不含载荷项}，故一个架次的作业时间为
+\textbf{引理 1（作业时间对架次数严格仿射）}。由式~\eqref{eq:energy-margin} 所在的物理模型可知，航段飞行时间只由爬升、巡航、下降三段构成（式~\eqref{eq:flight-time}），\textbf{不含载荷项}，故一个架次的作业时间为
 \begin{equation}
 	T_p=\big[\mathrm{prep}+\mathrm{hand}_{\mathrm{base}}+t_{\mathrm{go}}+t_{\mathrm{back}}\big]+\big[\mathrm{load}+\mathrm{hand}\big]\,n_p \;=\; A_g+b_g\,n_p,
 	\label{eq:q1-affine}
 \end{equation}
-其中 $n_p$ 为该架次承运的货箱数，$t_{\mathrm{go}}$、$t_{\mathrm{back}}$ 为去程与返程航段的时间，$A_g$、$b_g$ 只与该机型、该服务区有关。对某服务区\textbf{同一机型}的全部架次求和时 $\sum_p n_p=N$ 即该区由该机型承运的货箱总数，是定值，于是
+其中 $n_p$ 为该架次承运的货箱数，$t_{\mathrm{go}}$、$t_{\mathrm{back}}$ 为去程与返程航段的时间，$A_g$、$b_g$ 只与该机型、该服务区有关。对式~\eqref{eq:q1-affine} 在某服务区\textbf{同一机型}的全部架次上求和时 $\sum_p n_p=N$ 即该区由该机型承运的货箱总数，是定值，于是
 \begin{equation}
 	T_{\mathrm{total}}(k)=A_g\,k+b_g\,N,
 	\label{eq:q1-affine-total}

@@ -17,12 +17,12 @@
 \begin{subequations}
 	\label{eq:q3-cons}
 	\begin{align}
-		C_p(t) &= 1, && \forall p,\ \forall t\in[0,T]; \label{eq:q3-c1}\\
-		\sum_{r} a_{\ell r}\,y_r &\ge 1, && \forall \ell\in\mathcal{L}; \label{eq:q3-c2}\\
-		\bigl|\{k:\ k\ \text{在}\ t\ \text{时刻在役}\}\bigr| &\le n_{\mathrm{relay}}, && \forall t; \label{eq:q3-c3}\\
-		t^{\mathrm{link}}_{k} &\le a_{\ell}, && \forall\,(k,\ell):\ k\ \text{服务}\ \ell; \label{eq:q3-c4}\\
-		s_p &\ge \max\bigl\{0,\ \text{释放时刻},\ \text{无人机与电池就绪时刻}\bigr\}, && \forall p; \label{eq:q3-c5}\\
-		\text{问题二的 (C1)--(C6)} &\ \text{仍须成立}. && \label{eq:q3-c6}
+		C_p(t) &= 1, && \forall p,\ \forall t\in[0,T]; \tag{C1}\label{eq:q3-c1}\\
+		\sum_{r} a_{\ell r}\,y_r &\ge 1, && \forall \ell\in\mathcal{L}; \tag{C2}\label{eq:q3-c2}\\
+		\bigl|\{k:\ k\ \text{在}\ t\ \text{时刻在役}\}\bigr| &\le n_{\mathrm{relay}}, && \forall t; \tag{C3}\label{eq:q3-c3}\\
+		t^{\mathrm{link}}_{k} &\le a_{\ell}, && \forall\,(k,\ell):\ k\ \text{服务}\ \ell; \tag{C4}\label{eq:q3-c4}\\
+		s_p &\ge \max\bigl\{0,\ \text{释放时刻},\ \text{无人机与电池就绪时刻}\bigr\}, && \forall p; \tag{C5}\label{eq:q3-c5}\\
+		\text{问题二的 (C1)--(C6)} &\ \text{仍须成立}. && \tag{C6}\label{eq:q3-c6}
 	\end{align}
 \end{subequations}
 (C1) 是题面「全程连续通信」的直译——它作用在\textbf{逐时刻}上，而不是按架次取平均，故不能由「多数时刻连通」近似满足；(C2) 要求每个失效区间至少被一个启用的悬停站\textbf{完整}覆盖，这条下标 $\ell$ 上取「全部采样点」的口径正是覆盖系数 $a_{\ell r}$ 的定义（7.3 节）；(C3) 是中继机队的容量约束，$n_{\mathrm{relay}}=2$ 为题给库存；(C4) 是建链时刻约束——只有建链早于 $a_\ell$，$[a_\ell,b_\ell]$ 才能被完整覆盖，建链晚于窗口起点即意味着该区间早段必然中断，7.4 节的就绪性修复环正是按这一条把架次沿资源链后移的；(C5) 是错峰量的\textbf{下界}，它只由货箱释放时刻、无人机与共享电池的就绪时刻以及开始时刻非负这三者给出，\textbf{不含}「不早于问题二的开始时刻」这类额外限制（后者的性质见 7.5 节）；(C6) 表示错峰不得破坏问题二的任何硬约束，其中中继侧的无人机与能源组件周转并入问题二的资源链一并核算。
@@ -54,7 +54,7 @@
 	\min \sum_{r} y_r \quad \text{s.t.}\quad \sum_{r} a_{\ell r}\,y_r \ge 1,\ \ \forall \ell,
 	\label{eq:setcover}
 \end{equation}
-再以两层字典序求解：先最小化站数，再在最小站数下最小化中继总能耗。求解过程中先以粗步长（每 5 个采样点取 1）构造覆盖矩阵以免假负例，随后对入选的 $(j,r)$ 对做\textbf{全密度复核}，剔除实际覆盖不完全的列并重解，构成列生成式的修复环。在此基础上，用坐标下降法对 $({\rm lon},{\rm lat},h)$ 做连续局部微调，最大化该站对最不利采样点的接入裕量。
+再按式~\eqref{eq:q3-lex} 的后两层字典序求解：先最小化站数，再在最小站数下最小化中继总能耗。求解过程中先以粗步长（每 5 个采样点取 1）构造覆盖矩阵以免假负例，随后对入选的 $(j,r)$ 对做\textbf{全密度复核}，剔除实际覆盖不完全的列并重解，构成列生成式的修复环。在此基础上，用坐标下降法对 $({\rm lon},{\rm lat},h)$ 做连续局部微调，最大化该站对最不利采样点的接入裕量。
 
 集合覆盖先给出 \textbf{3 个悬停站}，几何上已覆盖全部 19 个区间。但「几何上覆盖」不等于「届时守得住」，也不等于「守得住的同时还排得开」：中继机只有 2 架，某些时刻落在这 3 个站上的区间数超过 2，某些区间则在其被覆盖的站上等不到中继机到位。第 \ref{sec:q3-repair} 节的\textbf{同时占站修复}与\textbf{换站修复}为此把一部分区间改派到别的候选站上，最终方案共 \textbf{6 个悬停站}（表~\ref{tab:q3-stations}）。
 
@@ -139,7 +139,7 @@
 	\end{tabular}
 \end{table}
 
-\textbf{三组口径对照。}「联合优化究竟带来了什么」可由三组对照说明（表~\ref{tab:relay-gap}）。三组都按同一套时间积分口径（$\Delta t=1$\,s）核算：\emph{无中继}即问题二的纯运输调度，\emph{序贯对照}为固定悬停高度 $300$\,m、贪心选站、不错峰、不做高度选择与连续精化的常规做法，\emph{联合优化}即本节方案。序贯对照与联合方案\textbf{共用同一套中继排班器与错峰机制}，差别只在站址、高度与修复环是否进入决策——唯有如此，两档之间的差值才能全部归因于被比较的那几项，而不掺入排班实现的好坏。
+\textbf{三组口径对照。}「联合优化究竟带来了什么」可由三组对照说明（表~\ref{tab:relay-gap}）。三组都按同一套时间积分口径（$\Delta t=1$\,s）核算，中继能耗按式~\eqref{eq:relay-energy} 计：\emph{无中继}即问题二的纯运输调度，\emph{序贯对照}为固定悬停高度 $300$\,m、贪心选站、不错峰、不做高度选择与连续精化的常规做法，\emph{联合优化}即本节方案。序贯对照与联合方案\textbf{共用同一套中继排班器与错峰机制}，差别只在站址、高度与修复环是否进入决策——唯有如此，两档之间的差值才能全部归因于被比较的那几项，而不掺入排班实现的好坏。
 
 \begin{table}[htbp]
 	\caption{三种通信保障口径的对照}

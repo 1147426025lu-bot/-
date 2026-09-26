@@ -24,12 +24,12 @@
 	L_g(q)=L_{g0}-\big(L_{g0}-L_{gF}\big)\Big(\frac{q}{Q_g}\Big)^{3/2},\quad 0\le q\le Q_g.
 	\label{eq:range}
 \end{equation}
-航段 $i\to j$ 的飞行时间按爬升、巡航、下降三段累加：
+航段 $i\to j$ 的飞行时间按爬升、巡航、下降三段累加（爬升与下降高度取式~\eqref{eq:climb-desc}）：
 \begin{equation}
 	t_{gij}=\frac{h^{+}_{ij}}{v^{\uparrow}_g}+\frac{d_{ij}}{v^{c}_g}+\frac{h^{-}_{ij}}{v^{\downarrow}_g}.
 	\label{eq:flight-time}
 \end{equation}
-航段运输能耗在题面附录 2 中被规定为水平巡航能耗与爬升附加能耗之和。附录给出的是这一分解口径：等效航程 $L_g(q)$ 由该附录定义，单组电池可用能量 $E_g^{\mathrm{use}}$ 与爬升能耗效率 $\eta^{\uparrow}_g$ 取自附件，而两项各自的算式附录并未写出。我们把它落实到题给量上——水平巡航能耗按“可用能量除以等效航程”折算出单位水平距离的耗电，再乘水平巡航距离；爬升附加能耗则取爬升段的重力势能除以爬升能耗效率。这种“水平距离项＋爬升势能项”的分解与多旋翼货运无人机能耗建模的通行做法一致\cite{zhang2021energy}：
+航段运输能耗在题面附录 2 中被规定为水平巡航能耗与爬升附加能耗之和。附录给出的是这一分解口径：等效航程 $L_g(q)$ 由该附录定义（式~\eqref{eq:range}），单组电池可用能量 $E_g^{\mathrm{use}}$ 与爬升能耗效率 $\eta^{\uparrow}_g$ 取自附件，而两项各自的算式附录并未写出。我们把它落实到题给量上——水平巡航能耗按“可用能量除以等效航程”折算出单位水平距离的耗电，再乘水平巡航距离；爬升附加能耗则取爬升段的重力势能除以爬升能耗效率。这种“水平距离项＋爬升势能项”的分解与多旋翼货运无人机能耗建模的通行做法一致\cite{zhang2021energy}：
 \begin{equation}
 	E_{gij}(q)=E_g^{\mathrm{use}}\frac{d_{ij}}{L_g(q)}
 	+\frac{1}{3.6\times10^{6}}\cdot\frac{(m_g^{\mathrm{empty}}+q)\,g_0\,h^{+}_{ij}}{\eta^{\uparrow}_g},
