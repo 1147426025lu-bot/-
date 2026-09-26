@@ -1,6 +1,22 @@
 \section{求解代码清单}
 
-我们全部求解代码位于项目 \texttt{code/} 目录，按模块化组织：四个问题各设主求解脚本，公共物理模型与方案读写抽为共享模块，精确验证、独立复核与结果生成另设脚本；按第 \ref{sec:run-order} 节给出的运行顺序依次执行，即可复现论文的主要结果，更完整的环境与口径说明见随包分发的 \texttt{results/\_交付与复现说明.txt}。所有代码均为 Python 3 实现，依赖标准科学计算与绘图库（numpy、pandas、matplotlib、seaborn、networkx，以及用于整数规划与二分求解的 scipy）。在离散优化上，问题一用同质类多重集动态规划在其可行域上求精确最优，问题四的分区由完全枚举给出、枚举结果即全局最优；问题三以集合覆盖整数规划在给定候选站集上精确选站，其余各层（连续站址精化、中继架次与链式服务调度、运输错峰、就绪性与换站修复）则都是\textbf{确定性的分层协调求解}。因此问题一、三、四的求解都不含随机搜索，但\textbf{问题三不据此宣称整体全局最优}——站址、区间归属与运输时序的外层搜索并未进行（见第 \ref{sec:q3-cost} 节）。问题二的大邻域自适应搜索是启发式，其随机流由脚本内的固定种子 \texttt{ALNS\_SEED} 初始化，故同一份代码重复运行的结果逐位一致。该结果对种子的依赖另有多种子稳定性对照（\texttt{make\_seed\_stats.py}，$4$ 个架次档 $\times$ $5$ 个种子 $=$ \mtQtwoSeedRuns 个组合，落盘 \texttt{results/q2\_seeds.csv}，只读派生、不写任何方案记录）：种子之间的完工时刻极差随档位放宽而收窄，由 $K\le20$ 档的 \mtQtwoSeedSpreadKTwenty\,s 降到交付档 $K\le25$ 的 \mtQtwoSeedSpreadKTwentyFive\,s、$K\le30$ 档的 \mtQtwoSeedSpreadKThirty\,s，且 $K\le30$ 档 $5$ 个种子中有 \mtQtwoSeedSameKThirty 个落到四项指标逐位相同的解。该对照只回答「换一组种子结果会不会面目全非」，\textbf{不构成最优性证明}——我们仍不据此声称该解已最优，其质量由 §6.3 的两层小规模精确解标定。
+我们全部求解代码位于项目 \texttt{code/} 目录，按模块化组织：四个问题各设主求解脚本，公共物理模型与方案读写抽为共享模块，精确验证、独立复核与结果生成另设脚本；按第 \ref{sec:run-order} 节给出的运行顺序依次执行，即可复现论文的主要结果，更完整的环境与口径说明见随包分发的 \texttt{results/\_交付与复现说明.txt}。所有代码均为 Python 3 实现，依赖标准科学计算与绘图库，实测版本见第 \ref{sec:run-env} 节。在离散优化上，问题一用同质类多重集动态规划在其可行域上求精确最优，问题四的分区由完全枚举给出、枚举结果即全局最优；问题三以集合覆盖整数规划在给定候选站集上精确选站，其余各层（连续站址精化、中继架次与链式服务调度、运输错峰、就绪性与换站修复）则都是\textbf{确定性的分层协调求解}。因此问题一、三、四的求解都不含随机搜索，但\textbf{问题三不据此宣称整体全局最优}——站址、区间归属与运输时序的外层搜索并未进行（见第 \ref{sec:q3-cost} 节）。问题二的大邻域自适应搜索是启发式，其随机流由脚本内的固定种子 \texttt{ALNS\_SEED} 初始化，故同一份代码重复运行的结果逐位一致。该结果对种子的依赖另有多种子稳定性对照（\texttt{make\_seed\_stats.py}，$4$ 个架次档 $\times$ $5$ 个种子 $=$ \mtQtwoSeedRuns 个组合，落盘 \texttt{results/q2\_seeds.csv}，只读派生、不写任何方案记录）：种子之间的完工时刻极差随档位放宽而收窄，由 $K\le20$ 档的 \mtQtwoSeedSpreadKTwenty\,s 降到交付档 $K\le25$ 的 \mtQtwoSeedSpreadKTwentyFive\,s、$K\le30$ 档的 \mtQtwoSeedSpreadKThirty\,s，且 $K\le30$ 档 $5$ 个种子中有 \mtQtwoSeedSameKThirty 个落到四项指标逐位相同的解。该对照只回答「换一组种子结果会不会面目全非」，\textbf{不构成最优性证明}——我们仍不据此声称该解已最优，其质量由 §6.3 的两层小规模精确解标定。
+
+\subsection{运行环境}
+\label{sec:run-env}
+
+下表列出产出论文全部结果所用的解释器与库版本，版本号在交付机器上逐项实测读出（\texttt{python} 中打印各模块的 \texttt{\_\_version\_\_}）：
+
+\begin{center}
+	\begin{tabular}{llll}
+		\toprule
+		Python 3.14.0 & numpy 2.3.5 & scipy 1.18.1 & pandas 2.3.3 \\
+		matplotlib 3.10.8 & seaborn 0.13.2 & networkx 3.7 & openpyxl 3.1.5 \\
+		\bottomrule
+	\end{tabular}
+\end{center}
+
+\noindent 其中整数规划与二分求解由 scipy 承担，其底层求解器为 HiGHS 1.12.0；论文由 XeLaTeX 编译（MiKTeX 25.12）。复现时请尽量对齐上表版本——论文中的全部数字都是在该版本组合下产出的。
 
 \subsection{程序运行顺序}
 \label{sec:run-order}
