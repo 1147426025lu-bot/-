@@ -53,7 +53,7 @@
 		\midrule
 		问题二 & 大邻域自适应搜索（ALNS）＋ $\varepsilon$-约束扫描，派工顺序升为决策变量 & \mtQtwoRecTrips\ 架次、\mtQtwoEnergy\,kWh、完工 \mtQtwoMakespan\,s；加权时延 \mtQtwoTardiness、硬违约 \mtQtwoHardViol & 两层小规模精确验证 \mtQtwoExactProved/\mtQtwoExactCases\ 例获最优性证书（\mtQtwoExactTimeout\ 例超时，以上界报告）；另有 \mtQtwoSeedRuns\ 次多种子运行，其中 \mtQtwoSeedFeas\ 次均可行 \\
 		\midrule
-		问题三 & 集合覆盖整数规划选站 ＋ 运输时刻与悬停高度联合优化 ＋ 资源链级联错峰 & \mtQthreeStations\ 个悬停站、中继能耗 \mtQthreeRelayEnergy\,kWh、联合完工 \mtQthreeJointDone\,s；中断时间占比 \mtQthreeGap & 沿三维轨迹逐时刻审计（步长 \mtQthreeCoverageStep\,s）；交付零迟到，最小硬时限余量 \mtQthreeMinMarginFine\,s \\
+		问题三 & 集合覆盖整数规划选站 ＋ 运输时刻与悬停高度联合建模 ＋ 资源链级联错峰 & \mtQthreeStations\ 个悬停站、中继能耗 \mtQthreeRelayEnergy\,kWh、联合完工 \mtQthreeJointDone\,s；中断时间占比 \mtQthreeGap & 沿三维轨迹逐时刻审计（步长 \mtQthreeCoverageStep\,s）；交付零迟到，最小硬时限余量 \mtQthreeMinMarginFine\,s \\
 		\midrule
 		问题四 & 并查集绑定原子单元 ＋ 完全枚举，另以组列集合划分整数规划复核 & 推荐 $K=\mtQfourK$：资源规模 $R=\mtQfourR$、均衡度 $CV_W=\mtQfourCV$；$K=2$ 与 $K=3$ 分别为 \mtQfourPartKTwo\ 与 \mtQfourPartKThree\ 种分区 & 库存可行分区数 \mtQfourFeasible；推荐分区缺口 \mtQfourGapSum\ 件；两条路径的资源规模一致 \\
 		\bottomrule
