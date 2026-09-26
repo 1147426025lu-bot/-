@@ -17,7 +17,7 @@ results/*.csv 重新算一遍，DEM 离散化误差从原始 .mat 重新采样�
 论文中只能引用本脚本 PASS 的项；未跑到、跳过或失败的项必须如实降级表述。
 
 用法：python code/verify.py
-输出：屏幕报告，每项检查的表号即论文第 9 章的表号（9.1--9.8，逐一对应）；
+输出：屏幕报告，每项检查的表号即论文第 9 章的表号（9.1--9.9，逐一对应）；
 全部通过时退出码 0。
 """
 import re
@@ -581,7 +581,7 @@ def check_relay(d):
 
     # 三段占比不在这里复算：本表按"段"记录，段首尾取点与逐时刻统计存在半个采样
     # 步长的口径差，照段复算会与逐时刻数字差约 0.5 个百分点，两个都对却看着像
-    # 矛盾。占比的时间积分口径由下面的 check_relay_final 独立重采样复算（表 9.5），
+    # 矛盾。占比的时间积分口径由下面的 check_relay_final 独立重采样复算（表 9.6），
     # 那里才是"中断 = 0"的复算处；本表只核资源约束与表内自洽。
     metrics = [
         ('中继架次 / 出动 / 通信保障分段', '%d / %d / %d' % (len(rt), len(out), len(cp))),
@@ -604,15 +604,168 @@ def check_relay(d):
 
 
 # ---------------------------------------------------------------------------
-# 表 9.7 问题三运输侧资源链（错峰后）
+# 表 9.5 问题三中继链式接续的物理重建与固定口径完工下界
+# ---------------------------------------------------------------------------
+# 坐标舍入界的推导（下面 TOL_CHAIN 的来历，不是拍脑袋给的数）：
+#   q3_stations.csv 的经纬度存 6 位小数，半个末位即 5e-7 度。纬向 1 度 ≈ 111 320 m，
+#   经向 1 度 ≈ 111 320·cos(23°) ≈ 102 500 m，故单端定位误差上界约
+#       sqrt(0.0557² + 0.0513²) ≈ 0.0758 m，
+#   两端相减、最坏取算术和 ≈ 0.152 m；海拔存 3 位小数，半末位 5e-4 m，可忽略。
+#   水平距离误差全部落在巡航段，除以 v_cruise = 15 m/s 得单段耗时误差上界
+#       0.152 / 15 ≈ 0.0101 s。
+#   取 TOL_CHAIN = 0.02 s 约为该界的 2 倍：既不会把舍入噪声判成错误，又比任何
+#   真实的模型偏差小 4 个数量级（最紧的一段本身是 106 s 量级）。
+#   实测最紧残差 −0.002 s，与上述界相容。
+TOL_CHAIN = 0.02
+_M_PER_DEG_LAT = 111320.0
+_CONF_M = 0.152          # 两端经纬度各半末位合成后的水平定位误差上界(m)
+
+
+def _leg_time(rt, geo):
+    """把中继航段耗时就地重写一遍，**不调用** core.relay_flight_time。
+
+    复核者与被复核对象共用同一个函数，就查不出该函数自身的改动；这里按题给的
+    v_up / v_cruise / v_down 重写，几何仍用公共模块 core.segment_geometry
+    （与 9.1 节的边界声明一致：本脚本排除的是求解程序内部状态与结果表之间的
+    串号，不排除公共物理模型本身的口径）。
+    """
+    return (geo['climb'] / rt['v_up'] + geo['d'] / rt['v_cruise']
+            + geo['descent'] / rt['v_down'])
+
+
+def check_relay_chain(d):
+    """表 9.5：中继链式接续的**物理重建**与固定口径完工下界。
+
+    与 `check_relay`（表 9.4）的分工必须说清楚：那张表只核结果表**内部**是否
+    自洽——出动级字段一致、各站能耗份额之和等于出动总能耗、编号在册、时段不重叠、
+    「中继」段落在某架次服务窗口内。它**不重建任何一段转场的时间**。
+
+    本表反过来，只做两件事：
+
+    1) **物理重建**。对每一次出动，把「上一站服务结束 → 下一站建链完成」这一段
+       的最短耗时（站间转场 + 建链）从 DEM 与该段两端的三维端点重新算一遍，
+       再看结果表记的时刻够不够；末段返航同样从末站重建。判据是
+           link_done[j] >= service_end[i] + τ(i→j) + link
+           返回O01     >= service_end[末] + τ(末→O01)
+
+    2) **完工下界**。固定站址、固定区间归属、固定运输时序时，每个失效区间的
+       保障都必须持续到它的窗口终点 b_ℓ，而负责它的那架中继机此后必须飞回 O01。
+       于是
+           T_joint >= max(T_transport, max_ℓ (b_ℓ + τ(s_ℓ → O01)))
+       本表按 q3_intervals.csv 的区间终点与 q3_stations.csv 的站址重算右端，
+       并核对方案确实达到它。**这只认证受限子问题的完工时间**：它不认证问题三的
+       全局最优，也不认证在相同完工时间下能耗最小——站址、区间归属与运输时序
+       都是固定住的。
+
+    为什么必须有第 1 项：连飞出动把「一站一往返」放宽为「一次出动连做多站」，
+    站间转场成了新的物理约束，而它此前不在任何独立复核的覆盖范围内。故障注入
+    可证：把 R02 在 S06 的建链完成时刻改成 R01 在 S05 的服务结束时刻（跨站转场
+    与建链被压成 0 s），表 9.4 仍然全项通过、错误列表为空。
+    """
+    rt = _inp('q3_relay_trips.csv')
+    iv = _inp('q3_intervals.csv')
+    tp = _inp('q3_transport_trips.csv')
+    R = d.relay_type
+    O = d.O01
+    bad = []
+
+    def _tau(lon_a, lat_a, alt_a, lon_b, lat_b, alt_b):
+        geo = segment_geometry(d.dem, lon_a, lat_a, alt_a, lon_b, lat_b, alt_b)
+        return _leg_time(R, geo)
+
+    # ---- 1) 链内每一段转场 + 建链 ----
+    n_leg = 0
+    worst_leg = None
+    for oid, g in rt.groupby('出动编号'):
+        g = g.sort_values('架次内序').reset_index(drop=True)
+        for k in range(len(g) - 1):
+            a, b = g.loc[k], g.loc[k + 1]
+            need = _tau(float(a['悬停经度']), float(a['悬停纬度']),
+                        float(a['悬停海拔m']),
+                        float(b['悬停经度']), float(b['悬停纬度']),
+                        float(b['悬停海拔m'])) + R['link']
+            slack = float(b['建链完成时刻s']) - (float(a['服务结束时刻s']) + need)
+            n_leg += 1
+            if worst_leg is None or slack < worst_leg[0]:
+                worst_leg = (slack, oid, a['悬停站编号'], b['悬停站编号'], need)
+            if slack < -TOL_CHAIN:
+                bad.append('出动 %s：%s→%s 转场加建链需 %.3f s，表中只留 %.3f s'
+                           '（差 %.3f s）'
+                           % (oid, a['悬停站编号'], b['悬停站编号'], need,
+                              float(b['建链完成时刻s']) - float(a['服务结束时刻s']),
+                              -slack))
+
+    # ---- 2) 每次出动的末段返航 ----
+    n_ret = 0
+    worst_ret = None
+    for oid, g in rt.groupby('出动编号'):
+        g = g.sort_values('架次内序').reset_index(drop=True)
+        last = g.iloc[-1]
+        need = _tau(float(last['悬停经度']), float(last['悬停纬度']),
+                    float(last['悬停海拔m']),
+                    O['lon'], O['lat'], O['alt'])
+        slack = float(last['返回O01时刻s']) - (float(last['服务结束时刻s']) + need)
+        n_ret += 1
+        if worst_ret is None or slack < worst_ret[0]:
+            worst_ret = (slack, oid, last['悬停站编号'], need)
+        if slack < -TOL_CHAIN:
+            bad.append('出动 %s：末站 %s 返航需 %.3f s，表中只留 %.3f s（差 %.3f s）'
+                       % (oid, last['悬停站编号'], need,
+                          float(last['返回O01时刻s']) - float(last['服务结束时刻s']),
+                          -slack))
+
+    # ---- 3) 固定口径的完工下界 ----
+    tau_home = {}
+    for _, r in _inp('q3_stations.csv').iterrows():
+        tau_home[r['悬停站编号']] = _tau(
+            float(r['悬停经度']), float(r['悬停纬度']), float(r['悬停海拔m']),
+            O['lon'], O['lat'], O['alt'])
+    lb_terms = []
+    for _, r in iv.iterrows():
+        st = r['悬停站编号']
+        if st in tau_home:
+            b = float(r['区间终点s'])
+            lb_terms.append((b + tau_home[st], r['失效区间编号'], st, b, tau_home[st]))
+    t_transport = float(tp['返回O01时刻s'].max())
+    t_joint = float(rt['返回O01时刻s'].max())
+    lb_relay = max(lb_terms)[0]
+    lb = max(t_transport, lb_relay)
+    gap = t_joint - lb
+    if gap < -TOL_CHAIN:
+        bad.append('联合完工 %.3f s 低于固定口径下界 %.3f s（差 %.3f s）——'
+                   '下界推导或站址/窗口数据有误' % (t_joint, lb, -gap))
+
+    drive = max(lb_terms)
+    metrics = [
+        ('链内转场段数 / 末段返航段数', '%d / %d' % (n_leg, n_ret)),
+        ('最紧一段（转场+建链）',
+         '%s 的 %s→%s：需 %.3f s，裕量 %+.3f s'
+         % (worst_leg[1], worst_leg[2], worst_leg[3], worst_leg[4], worst_leg[0])),
+        ('最紧一段（末段返航）',
+         '%s 的 %s：需 %.3f s，裕量 %+.3f s'
+         % (worst_ret[1], worst_ret[2], worst_ret[3], worst_ret[0])),
+        ('固定口径完工下界',
+         'max(运输 %.3f, %s 窗口终点 %.3f + %s 返航 %.3f) = %.3f s'
+         % (t_transport, drive[1], drive[3], drive[2], drive[4], lb)),
+        ('实际联合完工',
+         '%.3f s，与下界相差 %+.3f s（在容差内，即已达到该下界）'
+         % (t_joint, gap)),
+    ]
+    return rep('表 9.5   问题三中继链式接续独立复核', not bad, bad, dict(metrics),
+               '时刻 %.3f s（按经纬度半末位 %.3f m 除以 %.0f m/s 推导，取 2 倍）'
+               % (TOL_CHAIN, _CONF_M, R['v_cruise']))
+
+
+# ---------------------------------------------------------------------------
+# 表 9.8 问题三运输侧资源链（错峰后）
 # ---------------------------------------------------------------------------
 def check_q3_transport(d):
-    """表 9.7：**错峰之后**运输排班的资源链独立复核。
+    """表 9.8：**错峰之后**运输排班的资源链独立复核。
 
     为什么必须单独有这一张表：表 9.3 复核的是问题二自己的排班（读
     `q2_transport_trips.csv`），表 9.4 复核的是中继侧资源。第三问把运输架次的
     开始时刻整体后移了几千秒，而**后移之后**的无人机链与共享电池链此前没有任何
-    复核覆盖——终端检查（表 9.5）只判通信分段，看不见运输资源。实测正是这个缺口
+    复核覆盖——终端检查（表 9.6）只判通信分段，看不见运输资源。实测正是这个缺口
     放过了一个不可行解：U05 同时飞 T17 与 T24，重叠 1583 s，而全部既有检查都是
     「通过」。求解器侧已按硬约束拒绝它（`q3.solve_relay` 第 8 步），本表是与之
     **相互独立**的第二道关：全部数值由结果表自行反算，不调用 q3.py 的任何函数。
@@ -729,7 +882,7 @@ def check_q3_transport(d):
 
 
 # ---------------------------------------------------------------------------
-# 表 9.5  通信连续性与交付侧指标
+# 表 9.6  通信连续性与交付侧指标
 # ---------------------------------------------------------------------------
 def _q3_trips(d):
     """从 q2 结果表 + 错峰表重建**错峰后**的运输架次（路线、各区箱数、开始时刻）。"""
@@ -873,7 +1026,7 @@ def phase_boundary_errors(cp, span, tol=None):
 
 
 def check_relay_final(d, dt=1.0, frac_tol=0.01):
-    """表 9.5：问题三**终点方案**的独立复核（对应 3.5/3.6/3.7 三项要求）。
+    """表 9.6：问题三**终点方案**的独立复核（对应 3.5/3.6/3.7 三项要求）。
 
     与 check_relay 的分工：那张表查的是"结果表内部自洽 + 资源硬约束"，不重算
     通信；这张表按 Δt=1 s **逐时刻重判通信状态**，是"中断 = 0"这个结论的独立
@@ -1039,7 +1192,7 @@ def _stirling2(n, k):
 
 
 def check_q4(d):
-    """表 9.8：问题四任务分区与资源配置的独立复核。
+    """表 9.9：问题四任务分区与资源配置的独立复核。
 
     只读 q4 的结果表重算，**不重跑分区枚举**（那是 q4.py 的全部代价）：枚举
     规模本身改用 Stirling 数核对，其余四项全部从交付表重算——
@@ -1243,12 +1396,12 @@ def check_q4(d):
         ('含失效区间的组数（须各配 ≥1 架中继）',
          ' '.join('K=%d %d 组' % (K, n_iv_grp[K]) for K in sorted(n_iv_grp))),
     ]
-    return rep('表 9.8   问题四分区与资源配置独立复核', not bad, bad, dict(metrics),
+    return rep('表 9.9   问题四分区与资源配置独立复核', not bad, bad, dict(metrics),
                'R 与缺口逐位相等；着色编号数 = 峰值需求；枚举行数 = Stirling 数')
 
 
 def check_q3_metrics(d):
-    """表 9.6：问题三交付侧与能耗指标，从**结果表**独立重算后与 q3_metrics.csv 对照。
+    """表 9.7：问题三交付侧与能耗指标，从**结果表**独立重算后与 q3_metrics.csv 对照。
 
     重算只用 q3_box_delivery.csv / q3_transport_trips.csv / q3_relay_trips.csv
     与原始货箱表：加权迟到 = Σ 优先系数 × max(0, 交付时刻 − 期望送达)，
@@ -1544,10 +1697,11 @@ CHECKS = [
     ('表 9.2  问题一集合划分 ILP 交叉复核', check_q1_ilp),
     ('表 9.3   问题二硬约束独立复核', check_hard_constraints),
     ('表 9.4   问题三中继方案独立复核', check_relay),
-    ('表 9.5   通信连续性独立复核（Δt=1 s 逐时刻重判）', check_relay_final),
-    ('表 9.6  问题三交付侧与能耗指标独立重算', check_q3_metrics),
-    ('表 9.7  错峰后运输侧资源链独立复核', check_q3_transport),
-    ('表 9.8   问题四分区与资源配置独立复核', check_q4),
+    ('表 9.5   问题三中继链式接续独立复核（物理重建 + 固定口径下界）', check_relay_chain),
+    ('表 9.6   通信连续性独立复核（Δt=1 s 逐时刻重判）', check_relay_final),
+    ('表 9.7  问题三交付侧与能耗指标独立重算', check_q3_metrics),
+    ('表 9.8  错峰后运输侧资源链独立复核', check_q3_transport),
+    ('表 9.9   问题四分区与资源配置独立复核', check_q4),
     ('9.4 节   DEM 口径与离散化误差', check_dem_caliber),
     ('9.4 节   视线遮挡判定的步长敏感性', check_occlusion_step),
     ('9.4 节   双线性插值自洽性', check_bilinear_bound),

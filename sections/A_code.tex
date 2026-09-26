@@ -40,8 +40,8 @@
 		code/q3\_chain.py & 问题三的中继出动链式服务：把"一次出动只服务一个悬停站、必返 O01"放宽为一次出动依次服务多站再返场；该模块是交付中继排班的实际来源（出动数与能耗按\emph{整次出动}核算），并提供 \texttt{allow\_chain=False} 档以复现旧规则 \\
 		code/q3\_legacy.py & 旧出动规则的\emph{冻结副本}：\textbf{不在任何求解路径上}（\texttt{q3.py}、\texttt{q3\_chain.py} 都不 import 它，也不在求解器哈希清单内），保留它是为了让回归用例 T23"旧规则逐位可复现"能跑起来——旧规则可复现本身就是一条要交付的结论 \\
 		code/q4.py & 问题四：原子任务单元并查集归并、受限增长串完全枚举、组列集合划分整数规划复核、分组峰值资源需求与缺口核算 \\
-		code/verify.py & 独立复核脚本：只读结果表重算第 9 章的全部硬约束、通信连续性与 DEM 离散化误差；每项返回通过与否并以非零退出码表示失败 \\
-		code/tests\_regression.py & 回归测试：方案读写的篡改检出、外键与来源校验、时间占用冲突的精确秒数、零中继场景、分段表空洞检出、中继回传链路检出、旧出动规则逐位可复现、全部分区最小需求的独立枚举复核、打包预检等 32 项 \\
+		code/verify.py & 独立复核脚本：只读结果表重算第 9 章的全部硬约束、通信连续性、中继链式接续的转场时间与固定口径完工下界、DEM 离散化误差；每项返回通过与否并以非零退出码表示失败 \\
+		code/tests\_regression.py & 回归测试：方案读写的篡改检出、外键与来源校验、时间占用冲突的精确秒数、零中继场景、分段表空洞检出、中继回传链路检出、中继链式接续的三组负向注入、旧出动规则逐位可复现、全部分区最小需求的独立枚举复核、打包预检等 33 项 \\
 		code/check\_layout\_gates.py & 版式门禁：把四条 grep 判据（Overfull hbox / vbox、Reference / Citation undefined）与"摘要恰一页且下一页首行是目录"做成一次调用、一个退出码；缺 \texttt{pdftotext} 时如实报"未判定"并按失败退出 \\
 		code/paper\_metrics.py & 全文数字的唯一来源：只读 \texttt{results/}，生成 \texttt{results/paper\_metrics.json} 与 \texttt{sections/generated\_metrics.tex} 中的 \texttt{\textbackslash mtXXX} 宏，每个数字带出处，缺文件即失败 \\
 		code/fill\_results.py & 把 \texttt{results/*.csv} 回填进《结果提交模板》生成上传用结果表 \\

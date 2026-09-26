@@ -1481,6 +1481,91 @@ def t_q3_relay_chain_modes():
                   tolerance='不连飞档与冻结旧实现逐位相等（无容差）；份额恒等式 1e-12')
 
 
+# --- T24 -------------------------------------------------------------------
+@case
+def t_relay_chain_physics():
+    """
+    T24：`verify.check_relay_chain`（表 9.5）必须真的重建转场物理，而不只是
+    复述结果表内部的自洽性。
+
+    为什么要单独立这一条：连飞出动把「一次出动 $=$ 一站一往返」放宽为「一次出动
+    连做多站」，站间转场于是成了新的物理约束。实测过的那次故障注入是——把 R02
+    在 S06 的建链完成时刻改成 R01 在 S05 的服务结束时刻（跨站转场与建链被压成
+    0 s），`check_relay`（表 9.4）仍然全项通过、错误列表为空。本用例不复述那次
+    注入，只用「改坏表就该报错、不改就该通过」来钉住新检查确实在算这一段。
+
+    三组负向注入（每组都单独跑一次，互不叠加）：
+      (a) 零秒跨站：把某一段的建链完成时刻压到上一站的服务结束时刻；
+      (b) 末段返航少记：把某次出动末站的返回 O01 时刻压到本段服务结束时刻；
+      (c) 下界被违反：把某个失效区间的窗口终点推后 1h，使固定口径完工下界
+          超过实际联合完工时刻——这一条钉的是下界那一半，与 (a)(b) 无关。
+    三种情况下 `check_relay_chain` 都必须报失败，且错误行要落在对应的判据上。
+    """
+    v = _mod('verify')
+    if _need('q3_relay_trips.csv', 'q3_intervals.csv', 'q3_transport_trips.csv',
+             'q3_stations.csv'):
+        return result('T24 中继链式接续物理重建', True, skipped=True,
+                      errors=['缺问题三结果表，请先运行 python code/q3.py'])
+    d, _q1 = _data()
+    errs = []
+    seen = {}
+
+    def _run(mutate):
+        with _tamper(mutate) as vv:
+            return vv.check_relay_chain(d)
+
+    # 正向对照：原表必须通过
+    ok0 = _run(lambda tmp: None)
+    seen['原表'] = ok0['passed']
+    if not ok0['passed']:
+        errs.append('原表本应通过，却报失败：%s' % ok0['errors'][:2])
+
+    def _leg_index(rt):
+        """取一段真实的「同一次出动内的相邻两段」作注入点。"""
+        g = rt.sort_values(['出动编号', '架次内序']).reset_index(drop=True)
+        for i in range(len(g) - 1):
+            if g.loc[i, '出动编号'] == g.loc[i + 1, '出动编号']:
+                return i
+        raise AssertionError('结果表里没有任何一次出动含两段以上，夹具不成立')
+
+    def _mut_zero_transfer(tmp):
+        rt = _rd(tmp, 'q3_relay_trips.csv')
+        i = _leg_index(rt)
+        rt.loc[i + 1, '建链完成时刻s'] = float(rt.loc[i, '服务结束时刻s'])
+        _wr(rt, tmp, 'q3_relay_trips.csv')
+
+    def _mut_zero_return(tmp):
+        rt = _rd(tmp, 'q3_relay_trips.csv')
+        g = rt.sort_values(['出动编号', '架次内序']).reset_index(drop=True)
+        last = g.index[g['出动编号'] == g['出动编号'].iloc[-1]][-1]
+        rt.loc[last, '返回O01时刻s'] = float(rt.loc[last, '服务结束时刻s'])
+        _wr(rt, tmp, 'q3_relay_trips.csv')
+
+    def _mut_bound(tmp):
+        iv = _rd(tmp, 'q3_intervals.csv')
+        iv.loc[iv.index[0], '区间终点s'] = float(iv['区间终点s'].max()) + 3600.0
+        _wr(iv, tmp, 'q3_intervals.csv')
+
+    for tag, mut, key in [('零秒跨站', _mut_zero_transfer, '转场加建链'),
+                          ('末段返航少记', _mut_zero_return, '返航'),
+                          ('完工下界被违反', _mut_bound, '低于固定口径下界')]:
+        r = _run(mut)
+        seen[tag] = r['passed']
+        if r['passed']:
+            errs.append('注入「%s」后 check_relay_chain 仍报通过——该检查没有真的'
+                        '重建这一段物理量' % tag)
+        elif not _hit(r, key):
+            errs.append('注入「%s」后虽然失败，但错误行没有提到「%s」，可能不是'
+                        '对应判据触发：%s' % (tag, key, r['errors'][:2]))
+
+    return result('T24 中继链式接续物理重建', not errs, errs,
+                  metrics={'原表': '通过' if seen.get('原表') else '失败',
+                           '零秒跨站': '被拦下' if not seen.get('零秒跨站', True) else '漏过',
+                           '末段返航少记': '被拦下' if not seen.get('末段返航少记', True) else '漏过',
+                           '完工下界被违反': '被拦下' if not seen.get('完工下界被违反', True) else '漏过'},
+                  tolerance='三种注入必须各触发对应判据；原表必须通过')
+
+
 # --- T22 -------------------------------------------------------------------
 @case
 def t_excel_column_mapping():
