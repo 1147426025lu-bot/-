@@ -593,6 +593,32 @@
            打包 **140 个文件 / 27.7 MB**、数据 17 份压缩后 17.05 MB——**三项计数与
            改动前完全一致**，本次只动了一句正文，未触碰任何数字、未重跑求解器、
            未刷新 results/*.json，七个哈希求解器文件一个字节未动。
+     · 阶段29 `\texttt{}` 内汉字的字体修正（**只改 gmcmthesis.cls 一处**）：
+       (1) **起因**：作者问「附录 C 的 latex 字体是不是有问题」，核对**属实**。
+       (2) **定位**：ctex 的 windows 字体集把 **CJK 等宽映射到仿宋**。于是
+           \texttt{支撑材料.zip} 里的「支撑材料」出的是仿宋，而正文是宋体——
+           笔画细一档，在句中看着像掉出了正文字体。拉丁部分走 \setmonofont 的
+           Courier New，本来就是对的。取证链：pdffonts 第 77 页列出 FangSong 而
+           正文页没有；逐页扫得 FangSong 只落在 **p21/p73/p76/p77**；全篇含汉字
+           的 \texttt 共 **7 处**（由 _probe/find_tt.py 枚举，附录 C 占 3 处）。
+           日志里 FangSong/B、/BI、/I 无法解析亦由此而来（仿宋无粗斜体；
+           SimSun/SimHei/KaiTi 同样如此，是 Windows 中文字体的常态）。
+       (3) **须分清的一点**：这**不是字体缺失**。main.log 的 "Missing character"
+           计数为 0，LaTeX Font Warning 一条没有；仿宋是 ctex 主动映射的结果。
+           真正的问题是它与本文件 §四 自述的「正文小四宋体」字面上对不上。
+       (4) **处置**：cls 加一行 `\IfFontExistsTF{SimSun}{\setCJKmonofont{SimSun}}{}`
+           并附 5 行注释。带 \IfFontExistsTF 保护，非 Windows 平台无 SimSun 时
+           维持 ctex 各自字体集的默认。拉丁部分不受影响——\setmonofont 未动。
+       (5) **实测（含一次专门的重排检查）**：`FangSong` 在全篇 PDF 中**归零**
+           （改前为 p21/73/76/77）；仍 **77 页**；^! 计数 0、Missing character 0；
+           五项版式门禁全过；verify.py 12/12；tests_regression.py 33 项全过
+           0 跳过；build --check 清单 32 项；打包 **140 个文件 / 27.7 MB**、
+           数据 17 份 17.05 MB——三项计数与改前一致。
+           **重排专检**：字体一换最怕版式漂移，故取目录页码为探针逐项比对——
+           各章 4/6/9/12/17/24/32/44/51/66/68/70、参考文献 70、附录 A·B·C
+           72/75/76，**与改前逐项相同，全篇零重排**（宋体与仿宋的 CJK 字宽同为
+           1 em，故断行不因字体而变）。
+           **未动任何结果数字、未重跑求解器、未刷新 results/*.json。**
 
 五、未做的复核（如实列出，不得当作已做）
   · 多种子只做了**稳定性**对照，未做"跑更多种子取最优"的寻优：code/make_seed_stats.py

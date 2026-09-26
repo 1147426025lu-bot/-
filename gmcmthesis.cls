@@ -202,6 +202,14 @@ Just choose `xelatex', no `pdflatex' or `latex' and so on.}
 \IfFontExistsTF{Consolas}{\newfontfamily\gmcm@pythonfont{Consolas}}{%
   \newcommand\gmcm@pythonfont{\ttfamily}}
 
+% \texttt{} 里的汉字默认走 ctex 的 CJK 等宽映射，Windows 字体集下映射到**仿宋**。
+% 于是「\texttt{支撑材料.zip}」这类文件名会一半仿宋、一半 Courier：汉字笔画比
+% 正文的宋体细一档，在句中看着像掉出了正文字体。交付说明里自述「正文小四宋体」，
+% 与它对不上，故这里把 CJK 等宽并回正文的宋体。拉丁部分不受影响——\setmonofont
+% 仍是 Courier New，只有汉字回宋体。全篇含汉字的 \texttt 共 7 处（p21/p73/p76/p77）。
+% 加 \IfFontExistsTF 保护：非 Windows 平台无 SimSun，维持 ctex 各自字体集的默认。
+\IfFontExistsTF{SimSun}{\setCJKmonofont{SimSun}}{}
+
 % 中文正文、粗体与宋楷黑字体族由 ctex 按平台选择，勿覆盖为 macOS 专用字体。
 % 摘要页的固定标签使用隶书。原模板只按相对路径加载随附的 LiSu.ttf，于是
 % 「工程目录里没有这个文件就编不过」——而它是第三方商业字体（方正隶书），
