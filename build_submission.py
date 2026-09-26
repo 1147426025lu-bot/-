@@ -62,6 +62,12 @@ import solution_io as sio                                          # noqa: E402
 PAPER_PDF = ['main.pdf']
 # 支撑材料：源码 + 图表 + 程序 + 结果 + AI 使用详情
 SUPPORT = [
+    # 包根目录的使用说明。它要进包有两个理由：其一，评审解压后第一眼看到的是
+    # 一个 22 MB 的 数据/，若不解释「这为什么在包里」，最自然的误读就是「这队
+    # 不懂规则、把赛题数据重复上传了」；其二，数据目录的位置是硬约束（core.py
+    # 按 ROOT/数据 找，方案记录里存的是这 17 项的逐字节哈希），挪一层就全链
+    # 拒绝加载——这句话必须写在评审打开的第一个文件里，而不是埋在附录 C。
+    'README.txt',
     'main.tex', 'gmcmthesis.cls', 'logo.pdf', 'title.pdf',
     'sections', 'figures', 'code', 'results',
     'AI工具使用详情.tex', 'AI工具使用详情.pdf',
