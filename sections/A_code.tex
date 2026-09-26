@@ -68,7 +68,7 @@
 % 两段都含长串不可断的文件名与英文模型名，必须一起放进 sloppypar，
 % 否则 TeX 无法找到合法断点，会产生 Overfull \hbox。
 \begin{sloppypar}
-\noindent\textbf{数据来源注释：}本文全部数据分析结果由本队在人工智能工具辅助下编写的求解脚本计算得到，所用工具为 DeepSeek，版本/型号 DeepSeek V4.1 Flash（API 模型名 \texttt{deepseek-flash}），版本发布日期 2026 年 9 月 10 日，开发机构为杭州深度求索人工智能基础技术研究有限公司；各脚本首部与支撑材料《AI 工具使用详情》中已列明工具信息与使用过程；其中 \texttt{q3\_chain.py} 的字节内容已写入第三问方案记录的求解器哈希，改动它会使该记录失效，故其工具信息随同一条求解链上的 \texttt{q3.py} 一并声明。全部数据均由本队独立重复运行核验。
+\noindent\textbf{数据来源注释：}本文全部数据分析结果由本队在人工智能工具辅助下编写的求解脚本计算得到，所用工具为 DeepSeek，版本/型号 DeepSeek V4.1 Flash（API 模型名 \texttt{deepseek-flash}），版本发布日期 2026 年 9 月 10 日，开发机构为杭州深度求索人工智能基础技术研究有限公司\cite{deepseek2026}；各脚本首部与支撑材料《AI 工具使用详情》中已列明工具信息与使用过程；其中 \texttt{q3\_chain.py} 的字节内容已写入第三问方案记录的求解器哈希，改动它会使该记录失效，故其工具信息随同一条求解链上的 \texttt{q3.py} 一并声明。全部数据均由本队独立重复运行核验。
 
 问题一最大安全载荷、推荐组批方案、帕累托前沿与双路径复核结果见 \texttt{results/q1\_max\_payload.csv}、\texttt{q1\_recommended\_batching.csv}、\texttt{q1\_pareto.csv}、\texttt{q1\_ilp\_gap.csv} 与 \texttt{q1\_sensitivity.csv}；问题二运输架次、逐箱交付时刻、推荐方案快照、非支配前沿、消融与精确验证结果见 \texttt{results/q2\_transport\_trips.csv}、\texttt{q2\_box\_delivery.csv}、\texttt{q2\_recommended.json}、\texttt{q2\_pareto.csv}、\texttt{q2\_ablation.csv} 与 \texttt{q2\_exact.csv}；问题三悬停站选址、失效区间绑定、中继架次、错峰量、通信阶段与三种口径的覆盖率对照见 \texttt{results/q3\_stations.csv}、\texttt{q3\_intervals.csv}、\texttt{q3\_relay\_trips.csv}、\texttt{q3\_stagger.csv}、\texttt{q3\_comm\_phases.csv} 与 \texttt{q3\_coverage.csv}；问题四原子任务单元、分区配置、全部分区枚举与两类方案对照见 \texttt{results/q4\_units.csv}、\texttt{q4\_partition.csv}、\texttt{q4\_all\_partitions.csv} 与 \texttt{q4\_comparison.csv}。
 \end{sloppypar}
