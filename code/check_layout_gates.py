@@ -18,7 +18,9 @@
 1.  `Overfull \\hbox` / `Overfull \\vbox` / `Reference .* undefined` /
     `Citation .* undefined` 在 `main.log` 上的出现次数各为 0（用 `grep -c` 口径，
     即按行计数，与《交付与复现说明》一致）。
-2.  摘要恰一页：`摘要` 所在页必须同时含 `关键词`，且**下一页的首个非空行是 `目录`**。
+2.  摘要恰一页：`摘要` 所在页必须同时含 `关键词`，且**下一页的首个非空行是 `目录`**
+    （比对前抹掉空格：目录标题带字距，pdftotext 是否在「目」「录」间吐一个空格会
+    随编译摆动，实测相邻两版一次 '目录'、一次 '目 录'，不抹会假报失败）。
     第 2 条需要 `pdftotext`（poppler）。**没有它时如实报「未判定」并按失败退出**——
     「工具缺失」不等于「判据通过」，这正是本项目不许把未做的复核当成已做的规矩。
 
@@ -108,7 +110,12 @@ def main() -> int:
             has_kw = any('关键词' in ln for ln in lines)
             nxt = pdf_page(pdftotext, PDF, abs_page + 1) if abs_page < pages else []
             nxt_first = nxt[0] if nxt else '(无下一页)'
-            ok = has_kw and nxt_first.startswith('目录')
+            # 目录标题带字距，pdftotext 是否在「目」「录」之间吐一个空格，
+            # 取决于两个字形的位置差，同一份文档重编两次都可能不同——2026-09-26
+            # 实测相邻两版一次给 '目录'、一次给 '目 录'，判据因此假报失败。
+            # 故先抹掉空格再比：认的是同一个标题，判据本身（摘要页含关键词、
+            # 下一页是目录）一字未松。
+            ok = has_kw and nxt_first.replace(' ', '').replace('　', '').startswith('目录')
             print('[%s] 摘要恰一页：摘要=P.%d，关键词%s，下一页首行=%r'
                   % ('OK  ' if ok else 'FAIL', abs_page,
                      '同页' if has_kw else '**不在同页**', nxt_first))

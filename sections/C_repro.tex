@@ -1,0 +1,21 @@
+\section{复现与附件说明}
+
+% 本附录起因：外部意见指出附件存在只在附录 A 里被「暗示」，未明文声明。上传附件须在
+% 论文中注明，故在此写下明确声明，并把「包里有什么、数据从哪来、按什么顺序跑」一次交代。
+% 注意：本页及全篇不得出现队伍编号、培养单位等身份信息，故压缩包只按其中文名指称。
+% 包内文件数与体积为打包脚本实测值，随包体变动须同步（见《交付与复现说明》阶段25 记录）。
+\begin{center}
+	{\setlength{\fboxsep}{8pt}%
+	\fbox{\textbf{本文另行上传了附件压缩包。}}}
+\end{center}
+
+\noindent 该压缩包名为 \texttt{支撑材料.zip}，共 $139$ 个文件、压缩后约 $27.7$\,MB，内容分五类：
+（1）\textbf{完整可运行源程序}，即 \texttt{code/} 下的 $27$ 个 Python 脚本——四个问题的主求解脚本、公共物理模型与方案读写等共享模块、独立复核脚本 \texttt{verify.py} 与回归测试 \texttt{tests\_regression.py} 都在其中；
+（2）\textbf{结果提交表}，即按赛题所附模板回填的 \texttt{结果提交表-已填写.xlsx}；
+（3）\textbf{结果数据与插图}，即 \texttt{results/} 下的 $36$ 个 \texttt{.csv} 与 $4$ 个 \texttt{.json}，以及 \texttt{figures/} 下的 $22$ 张 \texttt{.png} 插图（\texttt{.drawio} 可编辑源文件一并附上）；
+（4）\textbf{论文源文件}，即 \texttt{main.tex}、\texttt{sections/} 下的 $17$ 个 \LaTeX{} 源文件与文档类 \texttt{gmcmthesis.cls}；
+（5）\textbf{《AI 工具使用详情》}（\texttt{.pdf} 及其 \LaTeX{} 源码），以及一份《交付与复现说明》，其中写明完整复现序列与哈希口径，并\textbf{专列一节如实列出尚未进行的复核}。
+
+\noindent 输入数据取自赛题所附的原始附件（附件一的基础数据、附件二的地理空间数据），\textbf{未作任何修改}。这些文件不属于计算结果，仍随包一并收录：方案记录中存有输入数据的逐字节哈希，评审解压后若缺其中任一份，方案加载器会判「输入数据与方案记录不一致」而拒绝读入，脚本便一步也走不下去，故此处不作选择性打包。压缩包体积的大部分正是来自这里——输入数据共 $17$ 份、压缩后约 $17.0$\,MB（占全包约六成），其中两份 $30$\,m DEM 文件（\texttt{.tif} 与 \texttt{.mat}）合计约 $13.3$\,MB。
+
+\noindent 复现按附录 \ref{sec:run-order} 的四步执行：解压后在工程根目录依次完成求解、独立复核、数字与图表、编译与打包；所需的解释器与库版本见附录 \ref{sec:run-env}，各文件的逐项职责见表~\ref{tab:code-list}。论文正文的全部数值由 \texttt{results/} 下的结果表经 \texttt{code/paper\_metrics.py} 生成，不由人工誊写，故重跑上述序列即可逐位复现全文数字。
