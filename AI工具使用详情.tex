@@ -1,5 +1,6 @@
 % 支撑材料：AI 工具使用详情（依《人工智能工具及输出使用规定》第 6 条）
-% 提交前请补全「版本发布日期」，并据实增删使用记录，不得编造。
+% 四个字段（工具名称／版本或型号／开发机构／版本发布日期）已于下表中填齐，见「记录项目」各行。
+% 使用记录须据实增删，不得编造。
 \documentclass[12pt,a4paper]{ctexart}
 \usepackage[margin=2.5cm]{geometry}
 \usepackage{array}
@@ -54,7 +55,6 @@
 	只读派生与指标脚本（make\_seed\_stats.py、make\_q3\_sens.py、make\_q4\_sens.py、make\_data\_table.py、make\_delivery\_table.py、paper\_metrics.py、fill\_results.py）、
 	绘图与生成脚本（figures.py、figures\_adv.py、make\_roadmap.py、make\_q2\_algorithm.py、render\_drawio.py）以及打包脚本 build\_submission.py，
 	涉及 DEM 采样与视线遮挡判定、二分法求最大安全载荷、FFD 装箱、离散事件调度与贪心集合覆盖等。 \\
-	涉及 DEM 采样与视线遮挡判定、二分法求最大安全载荷、FFD 装箱、离散事件调度与贪心集合覆盖等。 \\
 	主要提示与过程 &
 	提供报错信息、相关函数片段与期望输出，请工具分析原因并给出修改建议；对算法结构性问题（如调度回环的终止条件）
 	要求给出伪代码后再讨论。 \\
@@ -79,7 +79,9 @@
 \end{longtable}
 
 \vspace{1em}
-\noindent\textbf{声明：}本参赛队对上述记录的真实性负责。人工智能工具仅作为辅助手段，本文的建模思路、
-模型建立、结果分析与结论均由参赛队员独立完成并经复核。
+\noindent\textbf{声明：}本参赛队对上述记录的真实性负责。人工智能工具的参与范围以上表所列为限，
+即建模方案的讨论与比较、代码编写与排错、图表生成与排版、文字润色四类辅助工作；
+\textbf{模型方程、约束条件与求解算法均由本队独立推导确定}，工具给出的建议仅供参考，
+采纳与否由本队逐项判断，全部结果数字由本队脚本运行产生并经独立复核。
 
 \end{document}
