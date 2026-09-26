@@ -8,9 +8,10 @@
 % 而非上标（natbib 的 super 模式）。分隔符保持逗号：规范里的 [1][3] 是「引用两篇」的
 % 示意写法，改成 ][ 会把引用串拉宽，收益不抵重排风险。
 \setcitestyle{numbers,square,comma}
-% 附录 A 的代码清单表有 23 行、实测高约 840pt，而本版式 \textheight 只有约 688pt
-% （geometry top=30mm/bottom=25mm）——它装不进一页，必须允许跨页。xltabular 是
-% longtable 与 tabularx 的合体（可断页 + X 列 + 表头跨页重复），且仍是非浮动表。
+% 附录 A 的代码清单表装不进单页，故用 xltabular——longtable 与 tabularx 的合体，
+% 可断页 + X 列 + 表头跨页重复，且仍是非浮动表。该表的行数与版式实测值、以及
+% 为什么不能用 minipage 承载，写在 sections/A_code.tex 表前的注释里；此处只留
+% 「为什么载入这个宏包」，不重复具体数字——两处各写一份，改表时就必然有一处过期。
 \usepackage{xltabular}
 % cls 中 \thefigure 等取「节号.序号」，必须让计数器在每节/每附录处归零，否则出现 2.2、6.4 之类的跳号
 \counterwithin*{figure}{section}
